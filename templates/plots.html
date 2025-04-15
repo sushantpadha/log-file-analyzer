@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Log Visualizations</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Log Graphs</h1>
+    <form method="GET" action="/plots">
+        <input type="hidden" name="filename" value="{{ filename }}">
+        <label>From: <input type="datetime-local" name="from"></label>
+        <label>To: <input type="datetime-local" name="to"></label>
+        <button type="submit">Apply Filter</button>
+    </form>
+
+    <!-- Placeholder for actual graphs -->
+    <div>
+        <h3>Events Over Time</h3>
+        <img src="/static/plot1.png" alt="Line Plot">
+        <a href="/static/plot1.png" download>Download</a>
+    </div>
+    <div>
+        <h3>Level Distribution</h3>
+        <img src="/static/plot2.png" alt="Pie Chart">
+        <a href="/static/plot2.png" download>Download</a>
+    </div>
+    <div>
+        <h3>Event Code Distribution</h3>
+        <img src="/static/plot3.png" alt="Bar Chart">
+        <a href="/static/plot3.png" download>Download</a>
+    </div>
+</body>
+</html>

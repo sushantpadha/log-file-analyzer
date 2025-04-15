@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Log Display</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Log Contents</h1>
+    <a href="{{ url_for('download_csv', filename=filename) }}">Download CSV</a>
+    <a href="{{ url_for('show_plots', filename=filename) }}">View Graphs</a>
+
+    <table border="1">
+        <tr>
+            {% for head in headers %}
+            <th>{{ head }}</th>
+            {% endfor %}
+        </tr>
+        {% for row in rows %}
+        <tr>
+            {% for cell in row %}
+            <td>{{ cell }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
