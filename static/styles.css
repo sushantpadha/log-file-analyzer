@@ -1,0 +1,25 @@
+body {
+    font-family: sans-serif;
+    margin: 2em;
+}
+
+h1 {
+    color: #333;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1em;
+}
+
+th, td {
+    padding: 0.5em;
+    border: 1px solid #ccc;
+    text-align: left;
+}
+
+button {
+    padding: 0.5em 1em;
+    margin-top: 1em;
+}
