@@ -1,33 +1,144 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Log Visualizations</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <h1>Log Graphs</h1>
-    <form method="GET" action="/plots">
-        <input type="hidden" name="filename" value="{{ filename }}">
-        <label>From: <input type="datetime-local" name="from"></label>
-        <label>To: <input type="datetime-local" name="to"></label>
-        <button type="submit">Apply Filter</button>
-    </form>
+{% extends "base.html" %}
 
-    <!-- Placeholder for actual graphs -->
-    <div>
-        <h3>Events Over Time</h3>
-        <img src="/static/plot1.png" alt="Line Plot">
-        <a href="/static/plot1.png" download>Download</a>
-    </div>
-    <div>
-        <h3>Level Distribution</h3>
-        <img src="/static/plot2.png" alt="Pie Chart">
-        <a href="/static/plot2.png" download>Download</a>
-    </div>
-    <div>
-        <h3>Event Code Distribution</h3>
-        <img src="/static/plot3.png" alt="Bar Chart">
-        <a href="/static/plot3.png" download>Download</a>
-    </div>
-</body>
-</html>
+{% block title %}Graphs & Plots{% endblock %}
+
+{% block content %}
+    <h1>Generate Plots</h1>
+
+    {% if available_files %}
+        <label for="log-select-plot">Select Log File:</label>
+        <select id="log-select-plot">
+            <option value="">-- Select a File --</option>
+            {% for file_id, orig_name in available_files.items() %}
+                <option value="{{ file_id }}">{{ orig_name }} (ID: {{ file_id }})</option>
+            {% endfor %}
+        </select>
+
+        <div id="plot-options" style="margin-top: 15px; display: none;">
+             <fieldset>
+                 <legend>Select Plot Types (Apache Logs):</legend>
+                 <div>
+                     <input type="checkbox" id="plot-time" name="plot_type" value="events_over_time" checked>
+                     <label for="plot-time">Events logged with time (Line)</label>
+                 </div>
+                 <div>
+                     <input type="checkbox" id="plot-level" name="plot_type" value="level_distribution">
+                     <label for="plot-level">Level State Distribution (Pie)</label>
+                 </div>
+                 <div>
+                     <input type="checkbox" id="plot-eventcode" name="plot_type" value="event_code_distribution">
+                     <label for="plot-eventcode">Event Code Distribution (Bar)</label>
+                 </div>
+                 <!-- TODO: Add date range filters here -->
+                 <button class="green-btn" id="generate-plots-btn" style="margin-top: 10px;">Generate Plots</button>
+             </fieldset>
+        </div>
+
+        <div id="plots-display-area" style="margin-top: 20px;">
+            <p id="plot-loading-message" style="display: none;">Generating plots...</p>
+            <p id="plot-error-message" style="color: red; display: none;"></p>
+             <!-- Plots will be displayed here -->
+        </div>
+
+    {% else %}
+        <p>No processed log files available. Please <a href="{{ url_for('upload_page') }}">upload</a> some files first.</p>
+    {% endif %}
+{% endblock %}
+
+{% block scripts_extra %}
+     <script src="{{ url_for('static', filename='js/plots.js') }}"></script> {# Placeholder #}
+     <script>
+        // Basic JS for plot generation request
+        const plotSelectElement = document.getElementById('log-select-plot');
+        const plotOptionsDiv = document.getElementById('plot-options');
+        const generateBtn = document.getElementById('generate-plots-btn');
+        const plotsDisplayArea = document.getElementById('plots-display-area');
+        const plotLoadingMsg = document.getElementById('plot-loading-message');
+        const plotErrorMsg = document.getElementById('plot-error-message');
+
+        plotSelectElement.addEventListener('change', function() {
+            plotOptionsDiv.style.display = this.value ? 'block' : 'none';
+            plotsDisplayArea.innerHTML = ''; // Clear previous plots
+            plotErrorMsg.style.display = 'none';
+        });
+
+        generateBtn.addEventListener('click', function() {
+            const selectedLogId = plotSelectElement.value;
+            if (!selectedLogId) return;
+
+            const selectedPlotTypes = Array.from(document.querySelectorAll('input[name="plot_type"]:checked')).map(cb => cb.value);
+
+            if (selectedPlotTypes.length === 0) {
+                plotErrorMsg.textContent = 'Please select at least one plot type.';
+                plotErrorMsg.style.display = 'block';
+                return;
+            }
+
+            plotsDisplayArea.innerHTML = ''; // Clear previous plots/messages
+            plotLoadingMsg.style.display = 'block';
+            plotErrorMsg.style.display = 'none';
+
+            // Prepare data for backend
+            const payload = {
+                log_id: selectedLogId,
+                plot_types: selectedPlotTypes
+                // TODO: Add date range filter values here
+            };
+
+            fetch('/generate_plots', { // Changed endpoint name
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.error || `HTTP error ${response.status}`) });
+                }
+                return response.json(); // Expecting { success: true, plots: [{type: '...', url: '...', download_url: '...'}, ...] } or { success: false, error: '...' }
+            })
+            .then(result => {
+                plotLoadingMsg.style.display = 'none';
+                if (result.success && result.plots) {
+                    result.plots.forEach(plotInfo => {
+                        const plotContainer = document.createElement('div');
+                        plotContainer.style.marginBottom = '20px';
+                        plotContainer.style.border = '1px solid #eee';
+                        plotContainer.style.padding = '10px';
+
+                        const title = document.createElement('h3');
+                        title.textContent = plotInfo.title || plotInfo.type.replace(/_/g, ' '); // Make title nicer
+                        plotContainer.appendChild(title);
+
+                        const img = document.createElement('img');
+                        img.src = plotInfo.url + '?t=' + new Date().getTime(); // Add timestamp to prevent caching
+                        img.alt = `Plot for ${plotInfo.type}`;
+                        img.style.maxWidth = '100%';
+                        img.style.height = 'auto';
+                        plotContainer.appendChild(img);
+
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = plotInfo.download_url;
+                        downloadLink.textContent = 'Download Plot (PNG)';
+                        downloadLink.style.display = 'block';
+                        downloadLink.style.marginTop = '5px';
+                        // downloadLink.download = `${selectedLogId}_${plotInfo.type}.png`; // Suggest filename
+                        plotContainer.appendChild(downloadLink);
+
+                        plotsDisplayArea.appendChild(plotContainer);
+                    });
+                } else {
+                    plotErrorMsg.textContent = `Error generating plots: ${result.error || 'Unknown error'}`;
+                    plotErrorMsg.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                plotLoadingMsg.style.display = 'none';
+                plotErrorMsg.textContent = `Failed to generate plots: ${error.message}`;
+                plotErrorMsg.style.display = 'block';
+                console.error('Error generating plots:', error);
+            });
+        });
+     </script>
+{% endblock %}

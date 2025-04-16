@@ -1,27 +1,85 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Log Display</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <h1>Log Contents</h1>
-    <a href="{{ url_for('download_csv', filename=filename) }}">Download CSV</a>
-    <a href="{{ url_for('show_plots', filename=filename) }}">View Graphs</a>
+{% extends "base.html" %}
 
-    <table border="1">
-        <tr>
-            {% for head in headers %}
-            <th>{{ head }}</th>
-            {% endfor %}
-        </tr>
-        {% for row in rows %}
-        <tr>
-            {% for cell in row %}
-            <td>{{ cell }}</td>
-            {% endfor %}
-        </tr>
-        {% endfor %}
+{% block title %}Display Logs{% endblock %}
+
+{% block head_extra %}
+<style>
+    #controls {
+        margin-top: 15px;
+        display: none;
+    }
+
+    #download-csv-link {
+        margin-left: 10px;
+    }
+
+    #log-display-area {
+        margin-top: 20px;
+        max-height: 600px;
+        overflow-y: auto;
+    }
+
+    /* buttons */
+    .btn-sort {
+        position: absolute;
+        right: -5px;
+        background: transparent;
+        color: #999;
+        font-size: 1em;
+    }
+
+    .asc {
+        top: -21%;
+        margin: 10px;
+        padding: 1px;
+    }
+
+    .desc {
+        top: 16%;
+        margin: 10px;
+        padding: 1px;
+    }
+
+    .active {
+        color: #444;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Display Processed Logs</h1>
+
+{% if available_files %}
+<label for="log-select">Select Log File:</label>
+<select id="log-select">
+    <option value="">-- Select a File --</option>
+    {% for file_id, orig_name in available_files.items() %}
+    <option value="{{ file_id }}">{{ orig_name }} (ID: {{ file_id }})</option>
+    {% endfor %}
+</select>
+
+<div id="controls">
+    <button class="green-btn" id="filter-btn">Filter (TODO)</button>
+    <button class="green-btn" id="sort-reset-btn">Reset Sort</button>
+
+    <!-- Ref: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a -->
+    <a href="#" id="download-csv-link" download>Download this CSV</a>
+</div>
+
+<div id="log-display-area">
+    <p id="loading-message" style="display: none;">Loading...</p>
+    <table id="log-table">
+        <thead></thead>
+        <tbody></tbody>
     </table>
-</body>
-</html>
+    <p id="error-message" style="color: red; display: none;"></p>
+</div>
+
+{% else %}
+<p>No processed log files available. Please <a href="{{ url_for('upload_page') }}">upload</a> some files first.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts_extra %}
+<script src="{{ url_for('static', filename='js/display.js') }}"></script>
+{% endblock %}

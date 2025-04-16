@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Log File Analysis{% endblock %}</title>
+
+	{# Reference:
+		- url_for: https://flask.palletsprojects.com/en/stable/api/#flask.url_for
+		- 'static': https://flask.palletsprojects.com/en/stable/quickstart/#static-files
+	#}
+    
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+	{% block head_extra %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <a class="nav-brand" href="{{ url_for('upload_page') }}">Log Analyzer</a>
+            <ul class="nav-links">
+                <li><a href="{{ url_for('upload_page') }}">Upload</a></li>
+                <li><a href="{{ url_for('display_page') }}">Display Logs</a></li>
+                <li><a href="{{ url_for('plots_page') }}">Plots</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="container content">
+        {% block content %}
+        {% endblock %}
+    </main>
+
+    <!-- <footer>
+    </footer> -->
+
+    {% block scripts_extra %}{% endblock %}
+</body>
+</html>
