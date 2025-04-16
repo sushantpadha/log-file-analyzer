@@ -1,10 +1,3 @@
-#!/usr/bin/awk -f
-#
-# validate_logs.awk: Validate Apache log lines based on event templates.
-#
-# Usage:
-#   ./validate_logs.awk apache.log
-#
 BEGIN {
 	IFS=""
 	OFS=","
@@ -46,7 +39,9 @@ BEGIN {
 	match_count=0
 
 	# set header for csv
-	print "LineId,Time,Level,Content,EventId" > OUTFILE
+	print "LineId,Time,Level,Content,EventId" > OUTFILE	
+
+	err = 0
 }
 
 {
@@ -76,7 +71,8 @@ BEGIN {
 		# ! print invalid, erase csv and quit
 		print "invalid log line at " NR " : " $0
 		print "" > OUTFILE
-		exit 1
+		err = 1
+		exit
 	}
 
     # Compare the remaining content against each event template.
@@ -97,12 +93,15 @@ BEGIN {
 		# print NR " #" (NR-valid_count) " [NO MATCH] " $0
 
 	# writing to csv
-	# TODO: recheck
-	print valid_count, timestamp, level, content, matched_id >> OUTFILE
+	# TODO: FOR SOME REASON, BELOW CMD DOES NOT PRINT TO STDOUT
+	# TODO: BUT IF I REMOVE IT, THE NEXT (AND INTEGRAL) CMD DOES NOT WORK EITHER 
+	print(valid_count, timestamp, level, content, matched_id)
+	print(valid_count, timestamp, level, content, matched_id) >> OUTFILE
 }
 
 END {
-	# control only reaches here in case of valid file
+	if (err)
+		exit err
 	
 	print "logfile is valid apache error log"
 }
