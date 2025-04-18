@@ -1,5 +1,5 @@
 BEGIN {
-	IFS=""
+	FS=""
 	OFS=","
 
 	# defining event templates as strings for regex matching
