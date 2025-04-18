@@ -2,8 +2,9 @@ import os
 import subprocess
 import uuid
 
-# Using csv module *only* for reading the generated CSV for display/plotting
+# Using csv and pandas module because customizations are enabled
 import csv
+import pandas as pd
 
 from flask import (
     Flask,
@@ -14,13 +15,15 @@ from flask import (
     abort,
     url_for,
 )
+import flask
 
 import matplotlib
 
 # set non-interactive backend, ideal for this use case
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
+from matplotlib.dates import AutoDateLocator
+from matplotlib.ticker import MaxNLocator
 
 # CONFIGURATION
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -322,9 +325,9 @@ def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
 
 
 def parse_csv_request(log_id, request):
-    """Returns (`csv_fpath (str)`, `sort_opts (List)`, `filter_opts (List)`) 
+    """Returns (`csv_fpath (str)`, `sort_opts (List)`, `filter_opts (List)`)
     given an input `log_id` and `request` object.
-    
+
     Can raise exception."""
 
     # check for csv
@@ -485,14 +488,14 @@ def get_csv_endpoint(log_id):
     except Exception as e:
         # error is FileNotFound
         return jsonify({"error": f"{e}"}), 404
-    
+
     # get csv data as response
     try:
         response = get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False)
     except Exception as e:
         # error is server error
         return jsonify({"error": f"{e}"}), 500
-    
+
     return response
 
 
@@ -525,9 +528,9 @@ def download_csv(log_id):
     except Exception as e:
         # error is server error
         return jsonify({"error": f"{e}"}), 500
-    
+
     fname = os.path.split(fpath)[1]
-    
+
     try:
         # https://flask.palletsprojects.com/en/stable/api/#flask.send_from_directory
         # using `send_from_directory` for safety
@@ -548,194 +551,166 @@ def plots_page():
     return render_template("plots.html", available_files=available_files)
 
 
-@app.route("/generate_plots", methods=["POST"])
-def generate_plots():
-    """Generates selected plots for a given log file (via AJAX)."""
-    data = request.get_json()
-    log_id = data.get("log_id")
-    plot_types = data.get("plot_types", [])
-    # TODO: Get date range filters from 'data' later
+@app.route("/generate_plots/<log_id>")
+def generate_plots(log_id):
+    """Endpoint for generating plots. Returns response containing plot filename(s)"""
 
-    if not log_id or not plot_types:
-        return jsonify({"success": False, "error": "Missing log_id or plot_types"}), 400
-
-    csv_filename = f"{log_id}.csv"
-    csv_filepath = os.path.join(app.config["PROCESSED_FOLDER"], csv_filename)
-
-    if not os.path.exists(csv_filepath):
-        return (
-            jsonify({"success": False, "error": "CSV data not found for this log ID"}),
-            404,
-        )
-
-    plot_results = []
+    ### get csv data for plotting
+    try:
+        csv_fpath, sort_opts, filter_opts = parse_csv_request(log_id, request)
+    except Exception as e:
+        # error is FileNotFound
+        return jsonify({"error": f"{e}"}), 404
 
     try:
-        # --- Read CSV Data using Python (as allowed per requirements) ---
-        # This is where filtering by date range (using Python) would happen
-        # before passing data to plotting functions.
-        # For now, read all data. Later, add date filtering logic here.
-
-        # Example: Reading into a list of dicts might be convenient
-        # Note: Use pandas here ONLY if customization is allowed (as per instructions)
-        # For basic task, use standard csv module or basic parsing.
-        log_data = []
-        header = []
-        with open(csv_filepath, "r", newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            if not header:
-                raise ValueError("CSV file is empty or has no header")
-            # Assuming standard Apache log CSV columns: Timestamp, Level, EventID, Message etc.
-            # Adjust indices based on your ACTUAL bash script output CSV format!
-            # Let's assume: 0=Timestamp, 1=Level, 2=EventID
-            for row in reader:
-                if len(row) >= 3:  # Basic check
-                    log_data.append(
-                        {
-                            "Timestamp": row[
-                                0
-                            ],  # Keep as string for now, parse later if needed
-                            "Level": row[1],
-                            "EventID": row[2],
-                            # Add other fields if needed
-                        }
-                    )
-
-        # --- Generate Requested Plots ---
-        for plot_type in plot_types:
-            fig = None
-            plot_title = "Plot"
-            try:
-                if plot_type == "events_over_time":
-                    # TODO: Implement logic for "Events logged with time (Line Plot)"
-                    # - Parse timestamps
-                    # - Aggregate events per second/minute/hour
-                    # - Create line plot using matplotlib
-                    fig, ax = plt.subplots()
-                    ax.set_title("Events Over Time (Placeholder)")
-                    ax.set_xlabel("Time")
-                    ax.set_ylabel("Number of Events")
-                    # Dummy data:
-                    timestamps = np.arange(len(log_data))  # Replace with real time data
-                    event_counts = np.random.randint(
-                        1, 10, size=len(log_data)
-                    )  # Replace with real counts
-                    ax.plot(timestamps, event_counts)
-                    plot_title = "Events Over Time"
-
-                elif plot_type == "level_distribution":
-                    # TODO: Implement logic for "Level State Distribution (Pie Chart)"
-                    # - Count occurrences of each Level (e.g., 'notice', 'error')
-                    # - Create pie chart
-                    fig, ax = plt.subplots()
-                    levels = [entry["Level"] for entry in log_data]
-                    level_counts = {}
-                    for level in levels:
-                        level_counts[level] = level_counts.get(level, 0) + 1
-
-                    if level_counts:
-                        ax.pie(
-                            level_counts.values(),
-                            labels=level_counts.keys(),
-                            autopct="%1.1f%%",
-                        )
-                        ax.set_title("Level State Distribution")
-                    else:
-                        ax.text(
-                            0.5, 0.5, "No Level data found", ha="center", va="center"
-                        )
-                        ax.set_title("Level State Distribution")
-                    plot_title = "Level State Distribution"
-
-                elif plot_type == "event_code_distribution":
-                    # TODO: Implement logic for "Event Code Distribution (Bar Plot)" (E1-E6)
-                    # - Count occurrences of each EventID (E1-E6)
-                    # - Create bar chart
-                    fig, ax = plt.subplots()
-                    event_ids = [
-                        entry["EventID"] for entry in log_data if entry.get("EventID")
-                    ]  # Filter out blank IDs if any
-                    event_counts = {}
-                    # Specific codes E1-E6 mentioned in requirement
-                    target_events = {f"E{i}" for i in range(1, 7)}
-                    for eid in event_ids:
-                        if eid in target_events:
-                            event_counts[eid] = event_counts.get(eid, 0) + 1
-
-                    if event_counts:
-                        # Ensure consistent order even if some codes are missing
-                        sorted_events = sorted(
-                            [e for e in event_counts.keys() if e in target_events],
-                            key=lambda x: int(x[1:]),
-                        )
-                        counts = [event_counts[e] for e in sorted_events]
-                        ax.bar(sorted_events, counts)
-                        ax.set_title("Event Code Distribution (E1-E6)")
-                        ax.set_xlabel("Event ID")
-                        ax.set_ylabel("Number of Occurrences")
-                    else:
-                        ax.text(
-                            0.5,
-                            0.5,
-                            "No EventID data (E1-E6) found",
-                            ha="center",
-                            va="center",
-                        )
-                        ax.set_title("Event Code Distribution (E1-E6)")
-                    plot_title = "Event Code Distribution"
-
-                else:
-                    print(f"Warning: Unknown plot type requested: {plot_type}")
-                    continue  # Skip unknown types
-
-                # --- Save plot to a file ---
-                if fig:
-                    plot_filename = f"{log_id}_{plot_type}_{uuid.uuid4()}.png"
-                    plot_filepath = os.path.join(
-                        app.config["PLOT_FOLDER"], plot_filename
-                    )
-                    fig.tight_layout()  # Adjust layout
-                    fig.savefig(plot_filepath, format="png")
-                    plt.close(fig)  # Close the figure to free memory
-
-                    plot_results.append(
-                        {
-                            "type": plot_type,
-                            "title": plot_title,
-                            "url": url_for("get_plot", plot_filename=plot_filename),
-                            "download_url": url_for(
-                                "download_plot", plot_filename=plot_filename
-                            ),
-                        }
-                    )
-
-            except Exception as plot_error:
-                print(f"Error generating plot '{plot_type}' for {log_id}: {plot_error}")
-                # Optionally add error info to response if needed, for now just skip the plot
-                if fig:
-                    plt.close(fig)  # Ensure figure is closed on error too
-
-        return jsonify({"success": True, "plots": plot_results})
-
-    except FileNotFoundError:
-        return (
-            jsonify({"success": False, "error": "CSV data not found for this log ID"}),
-            404,
+        response: flask.Response = get_csv_data(
+            csv_fpath, sort_opts, filter_opts, for_download=False
         )
-    except ValueError as ve:  # Catch specific errors like empty CSV
-        print(f"Value error processing {csv_filepath}: {ve}")
-        return jsonify({"success": False, "error": f"Data error: {ve}"}), 400
     except Exception as e:
-        print(f"Error during plot generation for {log_id}: {e}")
-        # Ensure any open figures are closed if a general error occurs
-        plt.close("all")
-        return (
-            jsonify(
-                {"success": False, "error": f"Server error during plot generation: {e}"}
-            ),
-            500,
+        # error is server error
+        return jsonify({"error": f"{e}"}), 500
+
+    ### pandas for processing
+    data = response.get_json()
+    data_df = pd.DataFrame(data=data["data"], columns=data["header"])
+
+    ### make desired plot
+    plot_opts = parse_opts(request.args.get("plot", None))
+
+    # `plot_opts` can contain one or more of:
+    # - time
+    # - level
+    # - event
+
+    # set plot style
+    plt.style.use("petroff10")
+
+    # define fontdicts for title and labels
+    title_font = {
+        "family": "serif",
+        "color": "black",
+        "weight": "normal",
+        "size": 18,
+    }
+    label_font = {
+        "family": "serif",
+        "color": "black",
+        "weight": "normal",
+        "size": 14,
+    }
+
+    if "time" in plot_opts:
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        fig.tight_layout()
+
+        # `pd.to_datetime`: https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html
+        # strptime format: https://docs.python.org/3/library/datetime.html#strftime-and-strptime-behavior
+        timestamps = data_df.sort_values(
+            axis=0,
+            by="Time",
+            key=lambda x: pd.to_datetime(x, format="%a %b %d %H:%M:%S %Y"),
+        ).value_counts("Time", sort=False)
+
+        ax.plot(
+            timestamps.index,
+            timestamps.values,
+            marker=".",
+            linestyle="-",
+            markersize=5,
+            linewidth=1.5,
         )
+
+        ### set labels and title
+        ax.set_xlabel("Time", fontdict=label_font)
+        ax.set_ylabel("Number of events per second", fontdict=label_font)
+        ax.set_title("Events logged with time", fontdict=title_font)
+
+        # set auto locator for x-axis with 5 to 10 ticks
+        locator = AutoDateLocator(minticks=5, maxticks=10)
+        ax.xaxis.set_major_locator(locator)
+
+        # set y-axis to have only integer ticks
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+        # properly align x-tick labels (rotation + alignment)
+        ax.tick_params(axis="x", rotation=30, labelsize=10, length=5, color="gray")
+        for label in ax.get_xticklabels():
+            label.set_horizontalalignment("right")
+            label.set_verticalalignment("top")
+
+        # adjust y-tick label size
+        ax.tick_params(axis="y", labelsize=10, length=5, color="gray")
+
+        # increase spacing between axes labels and ticks
+        ax.yaxis.labelpad = 30
+        ax.xaxis.labelpad = 30
+
+        ax.grid(True, linestyle="--", alpha=0.8)
+
+        fig.savefig("a.png", format="png", bbox_inches="tight")
+        plt.close(fig)
+
+    if "level" in plot_opts:
+        # square figure
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        event_counts = data_df.sort_values(axis=0, by="Level").value_counts(
+            "Level", sort=False
+        )
+
+        # create the pie chart
+        wedges, texts, autotexts = ax.pie(
+            event_counts.values,
+            labels=event_counts.index,
+            autopct="%1.1f%%",
+            startangle=0,
+            textprops=label_font,
+            pctdistance=0.85,
+        )
+        # style percentage text
+        plt.setp(autotexts, size=12, weight="bold", color="#eee")
+
+        ax.set_title("Level State Distribution", fontdict=title_font, pad=30)
+
+        # ax.axis("equal")
+
+        fig.savefig("b.png", format="png", bbox_inches="tight")
+        plt.close(fig)
+
+    if "event" in plot_opts:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        event_counts = data_df.sort_values(axis=0, by="EventId").value_counts(
+            "EventId", sort=False
+        ).drop(labels="")
+
+        # create the bar chart
+        bars = ax.bar(event_counts.index, event_counts.values)
+
+        ax.set_xlabel("Event ID", fontdict=label_font)
+        ax.set_ylabel("Number of Occurrences", fontdict=label_font)
+        ax.set_title("Event Code Distribution (E1-E6)", fontdict=title_font)
+
+        # set axes ticks
+        ax.tick_params(axis="x", rotation=0, labelsize=10, length=5, color='gray')
+
+        # set integer spacing for ticks
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.tick_params(axis="y", labelsize=10, length=5, color='gray')
+
+        # adjust label padding
+        ax.yaxis.labelpad = 25
+        ax.xaxis.labelpad = 25
+
+        # add grid lines for yaxis only
+        ax.yaxis.grid(True, linestyle="--", alpha=0.8)
+        ax.xaxis.grid(False)
+
+        fig.savefig("c.png", format="png", bbox_inches="tight")
+        plt.close(fig)
+
+    return response
 
 
 @app.route("/plots/<plot_filename>")
