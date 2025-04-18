@@ -46,7 +46,7 @@ function handleFiles(files) {
 		} else {
 			// show warning for non-log files
 			console.warn(`skipping non-log file: ${file.name}`);
-			addStatusTile(file.name, false, `skipped: file must end with .log`);
+			addStatusTile(file.name, false, `Skipped: file must end with .log`);
 		}
 	});
 }
