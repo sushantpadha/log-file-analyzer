@@ -56,11 +56,11 @@ def check_filename(filename: str):
 
 
 def get_processed_files():
-    """Returns a dictionary of processed files {log_id: original_filename}."""
+    """Returns a dictionary of processed files {log_id: original_filename}. Note, files of form '*.processed.csv' are to be ignored."""
     processed = {}
     try:
         for filename in os.listdir(app.config["PROCESSED_FOLDER"]):
-            if filename.endswith(".csv"):
+            if filename.endswith(".csv") and not filename.endswith(".processed.csv"):
                 log_id = filename.rsplit(".", 1)[0]
                 # find the corressponding metadata file and read it to get original log file name
                 original_name = f"Log {log_id}"  # placeholder name
@@ -87,70 +87,6 @@ def get_processed_files():
     return processed
 
 
-def timestamp_to_seconds(row):
-    """Returns a value for sorting timestamps."""
-
-    # ! harcoding field == 1 for timestamp
-    timestamp_str = row[1].strip()
-
-    # Ex: Sun Dec 04 04:47:44 2005
-
-    parts = timestamp_str.split()
-    month, date, t_str, yr = parts[1], int(parts[2]), parts[3], int(parts[4])
-    hr, mint, sec = [int(x) for x in t_str.split(":")]
-
-    # month name map
-    months = {
-        "Jan": 1,
-        "Feb": 2,
-        "Mar": 3,
-        "Apr": 4,
-        "May": 5,
-        "Jun": 6,
-        "Jul": 7,
-        "Aug": 8,
-        "Sep": 9,
-        "Oct": 10,
-        "Nov": 11,
-        "Dec": 12,
-    }
-    month = months[month]
-
-    # leap year check
-    leap = lambda y: y % 400 == 0 or (y % 4 == 0 and y % 100 != 0)
-
-    # calculate total days from epoch 1 Jan 1970
-    total_days = 0
-    for y in range(1970, yr):
-        total_days += 366 if leap(y) else 365
-
-    # month day map
-    month_days = [
-        31,
-        28 + (1 if leap(yr) else 0),
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ]
-
-    for m in range(1, month):
-        total_days += month_days[m - 1]
-
-    total_days += date - 1
-
-    # total seconds
-    total_seconds = total_days * 86400 + hr * 3600 + mint * 60 + sec
-
-    return total_seconds
-
-
 def sort_data(data, opts):
     """Sorts parsed csv data based on options"""
     if not opts:
@@ -167,17 +103,15 @@ def sort_data(data, opts):
         if field == 0:
             key = lambda x: int(x[0])
 
-        # sort by level/content
-        elif field in [2, 3]:
+        # sort by timestamp/level/content
+        # NOTE: timestamp comparison can be done lexicographically
+        elif field in [1, 2, 3]:
             key = lambda x: x[field]
 
         # sort by eventid
+        # NOTE: assign empty/undefined eventid as last (in asc order)
         elif field == 4:
             key = lambda x: 7 if not x[4] else int(x[4][1])
-
-        # sort by timestamp
-        elif field == 1:
-            key = timestamp_to_seconds
 
         else:
             raise ValueError("opt[1] must be one of '01234'.")
@@ -185,6 +119,232 @@ def sort_data(data, opts):
         data = sorted(data, key=key, reverse=reverse)
 
     return data
+
+
+# check if dates are in correct format: YYYY-mm-DD HH:MM:SS
+def validate_datetime_str(datetime):
+    try:
+        date, time = datetime.split()
+
+        yr, mo, dy = date.split("-")
+        yr, mo, dy = int(yr), int(mo), int(dy)
+
+        if not (1 <= mo <= 12):
+            return False
+
+        days_in_month = [
+            31,
+            28 + (1 if (yr % 4 == 0 and (yr % 100 != 0 or yr % 400 == 0)) else 0),
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
+        ]
+
+        if not (1 <= dy <= days_in_month[mo - 1]):
+            return False
+
+        hr, mi, se = list(map(int, time.split(":")))
+
+        if not (0 <= hr < 24 and 0 <= mi < 60 and 0 <= se < 60):
+            return False
+
+        return True
+
+    except Exception:
+        return False
+
+
+def filter_csv(csv_fpath: str, opts: str):
+    """Given an input csv fpath and filterings options, produces a filtered file.
+    Returns `(out_fpath, exception)`.
+
+    In case of an exception, `out_fpath` defaults to `csv_fpath`."""
+
+    start_dt, end_dt = opts
+
+    # assuming file at `csv_fpath` exists
+
+    # assuming `opts` are not empty
+
+    # validate date strings
+    if not (validate_datetime_str(start_dt) and validate_datetime_str(end_dt)):
+        print(f"start: {start_dt} end: {end_dt}")
+        raise Exception(
+            "Error: Filtering options - start date, end date - not in correct format."
+        )
+
+    # filename for filtered csv
+    # {basename_wo_extension}.processed.csv
+    out_fpath = csv_fpath.rsplit(".", 1)[0] + ".processed.csv"
+
+    try:
+        # pass to script with proper args
+        print(
+            f"Running script: {FILTER_SCRIPT_PATH} {csv_fpath} {out_fpath} {start_dt} {end_dt}"
+        )
+        result = subprocess.run(
+            [FILTER_SCRIPT_PATH, csv_fpath, out_fpath, start_dt, end_dt],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # print debug output
+        if result.returncode == 0:
+
+            # basic check (num_lines > 1)
+            if not os.path.exists(out_fpath):
+                raise Exception(
+                    "Error: Filtering script did not produce file at desired location."
+                )
+            else:
+                if sum(1 for _ in open(out_fpath, "r")) <= 1:
+                    raise Exception(
+                        "Error: Filtering script produced empty filtered csv."
+                    )
+
+            print(f"SUCCESS stdout: {result.stdout}")
+            print(f"SUCCESS stderr: {result.stderr}")
+
+            # return fpath of output file if valid
+            return out_fpath
+
+        else:
+            print(f"FAILURE stdout: {result.stdout}")
+            print(f"FAILURE stderr (code {result.returncode}): {result.stderr}")
+
+            # create error message from stderr if possible
+            err = (
+                result.stderr.strip().split("\n")[-1]
+                if result.stderr
+                else "Error: Filtering failed."
+            )
+
+            raise Exception(err)
+
+    # error handling
+    except Exception as e:
+        # cleanup
+        if os.path.exists(out_fpath):
+            os.remove(out_fpath)
+
+        raise e
+
+
+def parse_opts(opts: str):
+    """Return `None` if `opts` is empty or all ','-seperated fields are empty, else, return list of strings by splitting at ','."""
+    if not opts:
+        return None
+
+    opts = opts.split(",")
+
+    for o in opts:
+        if o:
+            return opts
+    return None
+
+
+def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
+    """Return CSV data (as `flask.Response` via `jsonify`),
+    or, path (`str`) to filtered csv (if `for_download=True`) for given `log_id` with sort and filter opts.
+
+    - Assumes the caller is passing valid `csv_fpath`,
+      and `filter/sort_opts` are in a format suitable to
+      pass as args to suitable functions.
+    - Can raise exceptions!.
+
+    *Notes:*
+    - Filtering must be done within every `get_csv_data` call to ensure
+      complete freedom for users to filter data
+    - This also means filtering is "on-the-fly" only
+    """
+
+    if filter_opts:
+        try:
+            # returns new path
+            out_fpath = filter_csv(csv_fpath, filter_opts)
+
+            # both equivalent to an exception, but still check both
+            if out_fpath == csv_fpath:
+                raise Exception(f"Could not produce filtered CSV.")
+
+        except Exception as e:
+            raise Exception(f"Error filtering CSV {csv_fpath}: {e}")
+
+        csv_fpath = out_fpath
+
+    # in case download is required without sorting, send fpath as is
+    if for_download and not sort_opts:
+        return csv_fpath
+
+    # otherwise, either data is required or fpath is (with sorted data)
+    try:
+        header = []
+        data = []
+        # read csv data
+        with open(csv_fpath, "r") as csvfile:
+            csv_reader = csv.reader(csvfile)
+            header = next(csv_reader, None)
+            if not header:
+                raise Exception(f"Empty csv file/header")
+
+            for row in csv_reader:
+                if len(row) != len(header):  # basic check
+                    raise Exception(f"Malformed row in CSV file: {row}")
+                data.append(row)
+
+        # sort data
+        data = sort_data(data, sort_opts)
+
+    except Exception as e:
+        raise Exception(f"Error reading CSV {csv_fpath}: {e}")
+
+    # if data is required
+    if not for_download:
+        return jsonify({"header": header, "data": data, "filtered": bool(filter_opts)})
+
+    # otherwise, save sorted data into the file and pass that
+    try:
+        with open(csv_fpath, "w") as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(header)
+            csv_writer.writerows(data)
+    except Exception as e:
+        raise Exception(f"Error writing sorted data to CSV {csv_fpath}: {e}")
+
+    return csv_fpath
+
+
+def parse_csv_request(log_id, request):
+    """Returns (`csv_fpath (str)`, `sort_opts (List)`, `filter_opts (List)`) 
+    given an input `log_id` and `request` object.
+    
+    Can raise exception."""
+
+    # check for csv
+    csv_fname = f"{log_id}.csv"
+    csv_fpath = os.path.join(app.config["PROCESSED_FOLDER"], csv_fname)
+
+    if not os.path.exists(csv_fpath):
+        raise Exception(f"CSV file {csv_fpath} for log id {log_id} not found.")
+
+    # parse sort args of the form +/-N,+/-M,... from major to minor with 0<=N,M<=4
+    # default to None if empty or undefined
+    sort_opts = parse_opts(request.args.get("sort", None))
+
+    # parse filter args of the form start_date_str,end_date_str
+    # ! assumes date strs dont have commas
+    # default to None if empty or undefined
+    filter_opts = parse_opts(request.args.get("filter", None))
+
+    return csv_fpath, sort_opts, filter_opts
+
 
 ################## ROUTES #####################
 
@@ -318,73 +478,67 @@ def display_page():
 
 
 @app.route("/get_csv/<log_id>")
-def get_csv_data(log_id):
-    """Fetches CSV data for the display page table. Parses sorting and filtering arguments from request."""
-    # check for csv
-    csv_filename = f"{log_id}.csv"
-    csv_filepath = os.path.join(app.config["PROCESSED_FOLDER"], csv_filename)
-
-    if not os.path.exists(csv_filepath):
-        return jsonify({"error": "CSV file not found."}), 404
-
-    # parse sort args
-    # of the form +/-N,+/-M,... from major to minor with 0<=N,M<=4
-
-    # default to None if empty or undefined
-    sort_opts = (
-        request.args["sort"].split(",") if request.args.get("sort", None) else None
-    )
-
+def get_csv_endpoint(log_id):
+    """Endpoint for serving CSV data for table on display page."""
     try:
-        # using csv module since customizations have been implemented
-        header = []
-        data = []
-        # read csv data
-        with open(csv_filepath, "r", newline="", encoding="utf-8") as csvfile:
-            csv_reader = csv.reader(csvfile)
-            header = next(csv_reader, None)
-            if header:
-                for row in csv_reader:
-                    # basic check
-                    if len(row) == len(header):
-                        data.append(row)
-                    else:
-                        print(f"Skipping malformed row in {csv_filename}: {row}")
-
-        data = sort_data(data, sort_opts)
-
-        return jsonify({"header": header, "data": data})
-
+        csv_fpath, sort_opts, filter_opts = parse_csv_request(log_id, request)
     except Exception as e:
-        print(f"Error reading CSV {csv_filepath}: {e}")
-        return jsonify({"error": f"Failed to read or parse CSV file: {e}"}), 500
+        # error is FileNotFound
+        return jsonify({"error": f"{e}"}), 404
+    
+    # get csv data as response
+    try:
+        response = get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False)
+    except Exception as e:
+        # error is server error
+        return jsonify({"error": f"{e}"}), 500
+    
+    return response
 
 
 @app.route("/download_csv/<log_id>")
 def download_csv(log_id):
-    """Provides the processed CSV file for download."""
-    filename = f"{log_id}.csv"
-    # Retrieve original filename for download suggestion
-    original_name = "download"  # Default
+    """Endpoint for serving CSV data for download"""
+
+    # retrieve original filename for download suggestion
+    original_name = "download"  # default
     try:
         with open(
             os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.info"), "r"
         ) as f:
-            original_name = f.read().strip().rsplit(".", 1)[0]  # Use log name part
+            original_name = f.read().strip().rsplit(".", 1)[0]  # use log name part
     except FileNotFoundError:
-        pass  # Keep default name
+        pass
 
-    download_filename = f"{original_name}_processed.csv"
+    download_filename = f"{original_name}.csv"
 
+    # parse csv request
     try:
+        csv_fpath, sort_opts, filter_opts = parse_csv_request(log_id, request)
+    except Exception as e:
+        # error is FileNotFound
+        return jsonify({"error": f"{e}"}), 404
+
+    # get csv fpath
+    try:
+        fpath = get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=True)
+    except Exception as e:
+        # error is server error
+        return jsonify({"error": f"{e}"}), 500
+    
+    fname = os.path.split(fpath)[1]
+    
+    try:
+        # https://flask.palletsprojects.com/en/stable/api/#flask.send_from_directory
+        # using `send_from_directory` for safety
         return send_from_directory(
             app.config["PROCESSED_FOLDER"],
-            filename,
+            fname,
             as_attachment=True,
-            download_name=download_filename,  # Suggest a nicer filename
+            download_name=download_filename,
         )
-    except FileNotFoundError:
-        abort(404, description="CSV file not found.")
+    except Exception as e:
+        return jsonify({"error": f"Processed CSV file not found."}), 500
 
 
 @app.route("/plots")
