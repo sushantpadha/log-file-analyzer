@@ -1,23 +1,93 @@
-const selectElement = document.getElementById('log-select');
+// define elements
+const selectEl = document.getElementById('log-select');
 const displayArea = document.getElementById('log-display-area');
 const logTable = document.getElementById('log-table');
 const loadingMessage = document.getElementById('loading-message');
 const errorMessage = document.getElementById('error-message');
 const controlsDiv = document.getElementById('controls');
 const downloadLink = document.getElementById('download-csv-link');
-const sortResetBtn = document.getElementById('sort-reset-btn')
 
-let sort_opts = "";
+const sortResetBtn = document.getElementById('sort-reset-btn');
+const filterApplyBtn = document.getElementById('filter-apply-btn');
+const filterResetBtn = document.getElementById('filter-reset-btn');
 
-// some peculiarity of the `this` keyword in arrow functions / regular functions
-document.addEventListener('DOMContentLoaded', function () { updateTable(selectElement); })
-selectElement.addEventListener('change', function () { updateTable(this); });
-selectElement.addEventListener('click', function () { updateTable(this); });
+const startDateEl = document.getElementById('start-date');
+const startTimeEl = document.getElementById('start-time');
+const endDateEl = document.getElementById('end-date');
+const endTimeEl = document.getElementById('end-time');
+
+// global variables for setting parameters for fetch request
+let sortOpts = "";
+let startDatetimeOpt = ""
+let endDatetimeOpt = ""
+
+// these are set from unfiltered csv and used for validating filter options
+let minDatetimeOpt = startDatetimeOpt;
+let maxDatetimeOpt = endDatetimeOpt;
+
+document.addEventListener('DOMContentLoaded', updateTable);
+selectEl.addEventListener('click', updateTable);
+filterApplyBtn.addEventListener('click', filterBtnCallback);
 
 sortResetBtn.addEventListener('click', () => {
-	sort_opts = "";
-	updateTable(selectElement);
+	sortOpts = "";
+	updateTable(selectEl);
 });
+
+filterResetBtn.addEventListener('click', () => {
+	startDatetimeOpt = "";
+	endDatetimeOpt = "";
+	updateTable(selectEl);
+});
+
+// =================== eventlistener callback funcs =================
+
+// TODO: in `updateTable` update start and end dates to extreme values of data extracted from response
+
+// parse filter data, update date global vars and update table
+function filterBtnCallback() {
+	// read data from inputs
+	const startDate = startDateEl.value;
+	const startTime = startTimeEl.value;
+	const endDate = endDateEl.value;
+	const endTime = endTimeEl.value;
+
+	// validate data
+	// TODO: wrt prev response
+	if (!(startDate && startTime && endDate && endTime)) {
+		console.log(`'${startDate}' '${startTime}' '${endDate}' '${endTime}' `)
+		window.alert('One of the date time fields for filtering is empty!');
+		return;
+	}
+
+	// assuming formats are correct because these are standard HTML elements
+	// YYYY-mm-DD and HH:MM:SS resp.
+
+	const startDatetime = `${startDate} ${startTime}`;
+	const endDatetime = `${endDate} ${endTime}`;
+
+	// YYYY-mm-DD HH:MM:SS is already in valid lexico order !!!
+	if (startDatetime < minDatetimeOpt) {
+		window.alert(`Start date time is less than minimum value in log file (${minDatetimeOpt})!`);
+		return;
+	}
+	if (endDatetime > maxDatetimeOpt) {
+		window.alert(`End date time is more than maximum value in log file (${maxDatetimeOpt})!`);
+		return;
+	}
+	// basic check
+	if (startDatetime > endDatetime) {
+		window.alert('Start date time is more than end date time!');
+		return;
+	}
+
+	// set dates
+	startDatetimeOpt = startDatetime;
+	endDatetimeOpt = endDatetime;
+
+	// update table
+	updateTable(selectEl);
+}
 
 // when sort btn is clicked, updates the sort_opts global var
 function sortBtnCallback(type, field, el) {
@@ -29,23 +99,24 @@ function sortBtnCallback(type, field, el) {
 	// console.log(`prev opts: ${sort_opts}`)
 
 	// remove prev occurence of any options for this field
-	const opts = sort_opts && sort_opts !== ''
-		? sort_opts.split(',').filter(o => Number(o.charAt(1)) !== field)
+	const opts = sortOpts && sortOpts !== ''
+		? sortOpts.split(',').filter(o => Number(o.charAt(1)) !== field)
 		: [];
 
 	// console.log(`proc opts: ${opts}`)
 
-	sort_opts = [opt, ...opts].join(',');
+	sortOpts = [opt, ...opts].join(',');
 
 	// console.log(`new opts: ${sort_opts}`)
 
 	// finally, update table
-	updateTable(selectElement);
+	updateTable(selectEl);
 }
 
-function updateTable(el) {
-	const selectedLogId = el.value;
-	// console.log(`/get_csv/${selectedLogId}?sort=${sort_opts}`);
+// send httprequest and update table
+function updateTable() {
+	const selectedLogId = selectEl.value;
+	// console.log(getRequestEndpoint(selectedLogId));
 
 	// clear table content and remove controls and error messages
 	logTable.querySelector('thead').innerHTML = '';
@@ -54,13 +125,15 @@ function updateTable(el) {
 	controlsDiv.style.display = 'none';
 
 	// parse sort_opts to highlight buttons
-	const parsed_sort_opts = sort_opts.split(',');
-	console.log(parsed_sort_opts);
+	const parsed_sort_opts = sortOpts.split(',');
+	// console.log(parsed_sort_opts);
 
 	if (selectedLogId) {
 		loadingMessage.style.display = 'block';
 		// fetch csv data from backend
-		fetch(`/get_csv/${selectedLogId}?sort=${sort_opts}`)
+		const req_str = getRequestEndpoint(selectedLogId);
+		console.log(`Making HTTP request: ${req_str}`)
+		fetch(req_str)
 			.then(response => {
 				if (!response.ok) {
 					throw new Error(`HTTP error! status: ${response.status}`);
@@ -83,7 +156,7 @@ function updateTable(el) {
 					const th = document.createElement('th');
 					th.textContent = colName;
 
-					// ▲▼ add buttons
+					// ▲▼ add buttons with appropriate classes and attach event listeners
 
 					const btn1 = document.createElement('button');
 					btn1.textContent = '▲';
@@ -119,10 +192,52 @@ function updateTable(el) {
 					tbody.appendChild(tr);
 				});
 
-				// show controls and set download link and filename
+				// set controls and download link
+				// TODO: work with sorted and filered data
 				controlsDiv.style.display = 'block';
-				downloadLink.href = `/download_csv/${selectedLogId}`;
+				downloadLink.href = getRequestEndpoint(selectedLogId, download=true);
 				downloadLink.download = `${selectedLogId}.csv`;
+
+				// if unfiltered data, use it to set min and max for date time
+				if (!result.filtered) {
+					// convert into formatted timestampts YYYY-mm-DD HH:MM:SS
+					const fmtdTimestamps = result.data.map(row => row[1]).map(tstmp => {
+						const [_, mo, dt, time, yr] = tstmp.split(' ');
+
+						// define month map
+						const month_map = {
+							"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "May": "05", "Jun": "06",
+							"Jul": "07", "Aug": "08", "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"
+						};
+						const month = month_map[mo];
+
+						return `${yr}-${month}-${dt} ${time}`;
+					});
+
+					console.log("setting min max datetimes");
+
+					// use lexi ordering with `reduce` to get min and max
+					minDatetimeOpt = fmtdTimestamps.reduce((minm, curr) => (curr < minm ? curr : minm));
+					maxDatetimeOpt = fmtdTimestamps.reduce((maxm, curr) => (curr > maxm ? curr : maxm));
+
+					// set limits for input elemets
+					startDateEl.min = minDatetimeOpt.split(' ')[0];
+					startDateEl.max = maxDatetimeOpt.split(' ')[0];
+					startTimeEl.min = minDatetimeOpt.split(' ')[1];
+					startTimeEl.max = maxDatetimeOpt.split(' ')[1];
+
+					endDateEl.min = minDatetimeOpt.split(' ')[0];
+					endDateEl.max = maxDatetimeOpt.split(' ')[0];
+					endTimeEl.min = minDatetimeOpt.split(' ')[1];
+					endTimeEl.max = maxDatetimeOpt.split(' ')[1];
+
+					// set defaults
+					startDateEl.value = minDatetimeOpt.split(' ')[0];
+					startTimeEl.value = minDatetimeOpt.split(' ')[1];
+
+					endDateEl.value = maxDatetimeOpt.split(' ')[0];
+					endTimeEl.value = maxDatetimeOpt.split(' ')[1];
+				}
 
 			})
 			.catch(error => {
@@ -134,4 +249,8 @@ function updateTable(el) {
 	}
 }
 
-// document.getElementById('filter-btn').addEventListener('click', () => alert('Filter not implemented'));
+// ========================== helper funcs ==========================
+
+function getRequestEndpoint(logId, download=false) {
+	return (download ? '/download_csv/' : '/get_csv/') + `${logId}?sort=${sortOpts}&filter=${startDatetimeOpt},${endDatetimeOpt}`
+}

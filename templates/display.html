@@ -4,6 +4,7 @@
 
 {% block head_extra %}
 <style>
+    /* form controls */
     #controls {
         margin-top: 15px;
         display: none;
@@ -17,6 +18,10 @@
         margin-top: 20px;
         max-height: 600px;
         overflow-y: auto;
+    }
+
+    .datetime-input-label {
+        /* display: inline-block; */
     }
 
     /* buttons */
@@ -59,7 +64,18 @@
 </select>
 
 <div id="controls">
-    <button class="green-btn" id="filter-btn">Filter (TODO)</button>
+    <label class="datetime-input-label" for="datetime">Select start date and time</label>
+    <input type="date" class="date-input" id="start-date" required>
+    <input type="time" class="time-input" id="start-time" step="1" required>
+
+    
+    <label class="datetime-input-label" for="datetime">Select end date and time</label>
+    <input type="date" class="date-input" id="end-date" required>
+    <input type="time" class="time-input" id="end-time" step="1" required>
+
+    <button class="green-btn" id="filter-apply-btn">Apply Filter</button>
+    <button class="green-btn" id="filter-reset-btn">Reset Filter</button>
+
     <button class="green-btn" id="sort-reset-btn">Reset Sort</button>
 
     <!-- Ref: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a -->
