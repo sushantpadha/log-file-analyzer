@@ -2,7 +2,7 @@
 
 # just in case
 if [[ ! ($# -eq 2) ]]; then
-    echo "Usage: <script.sh> <log_file_path> <csv_file_path>"
+    echo "Usage: <script.sh> <log_file_path> <csv_file_path>" >&2
     exit 1
 fi
 
@@ -15,6 +15,7 @@ sed -i.bck 's/\r$//' "$1"
 # and relevant permissions are given
 
 # ! Assumes script is always called from project root
+# TODO: ensure no issues with quoting
 awk -v OUTFILE="$2" -f "bash/validate_parse.awk" "$1"
 
 err=$?
