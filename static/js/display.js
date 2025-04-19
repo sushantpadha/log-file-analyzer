@@ -129,7 +129,7 @@ function updateTable() {
 		loadingMessage.style.display = 'block';
 
 		// fetch csv data from backend
-		const reqEndpt = getRequestEndpoint(selectedLogId, 'get_csv');
+		const reqEndpt = getRequestURL(selectedLogId, 'get_csv');
 
 		console.log(`Making HTTP request: ${reqEndpt}`)
 		
@@ -195,7 +195,7 @@ function updateTable() {
 
 				// set controls and download link
 				controlsDiv.style.display = 'block';
-				downloadLink.href = getRequestEndpoint(selectedLogId, 'download_csv');
+				downloadLink.href = getRequestURL(selectedLogId, 'download_csv');
 				downloadLink.download = `${selectedLogId}.csv`;  // default suggestion for filename
 				// will be overriden by response from flask app?
 
@@ -253,6 +253,6 @@ function updateTable() {
 // ========================== helper funcs ==========================
 
 // returns the full request URL str, given a `logId` and the `basePath` of the API endpoint
-function getRequestEndpoint(logId, basePath) {
+function getRequestURL(logId, basePath) {
 	return `/${basePath}/${logId}?sort=${sortOpts}&filter=${startDatetimeOpt},${endDatetimeOpt}`
 }
