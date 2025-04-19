@@ -42,9 +42,7 @@ filterResetBtn.addEventListener('click', () => {
 
 // =================== eventlistener callback funcs =================
 
-// TODO: in `updateTable` update start and end dates to extreme values of data extracted from response
-
-// parse filter data, update date global vars and update table
+// parse filter data, update date global vars and call `updateTable`
 function filterBtnCallback() {
 	// read data from inputs
 	const startDate = startDateEl.value;
@@ -53,7 +51,6 @@ function filterBtnCallback() {
 	const endTime = endTimeEl.value;
 
 	// validate data
-	// TODO: wrt prev response
 	if (!(startDate && startTime && endDate && endTime)) {
 		console.log(`'${startDate}' '${startTime}' '${endDate}' '${endTime}' `)
 		window.alert('One of the date time fields for filtering is empty!');
@@ -89,7 +86,7 @@ function filterBtnCallback() {
 	updateTable(selectEl);
 }
 
-// when sort btn is clicked, updates the sort_opts global var
+// update the `sortOpts` global var and call `updateTable`
 function sortBtnCallback(type, field, el) {
 	// type = +/-
 	// field is int from 0 - 4 (inc.)
@@ -113,7 +110,7 @@ function sortBtnCallback(type, field, el) {
 	updateTable(selectEl);
 }
 
-// send httprequest and update table
+// send HTTPRequest via `fetch` and update table
 function updateTable() {
 	const selectedLogId = selectEl.value;
 	// console.log(getRequestEndpoint(selectedLogId));
@@ -125,15 +122,18 @@ function updateTable() {
 	controlsDiv.style.display = 'none';
 
 	// parse sort_opts to highlight buttons
-	const parsed_sort_opts = sortOpts.split(',');
-	// console.log(parsed_sort_opts);
+	const parsedSortOpts = sortOpts.split(',');
+	// console.log(parsedSortOpts);
 
 	if (selectedLogId) {
 		loadingMessage.style.display = 'block';
+
 		// fetch csv data from backend
-		const req_str = getRequestEndpoint(selectedLogId);
-		console.log(`Making HTTP request: ${req_str}`)
-		fetch(req_str)
+		const reqEndpt = getRequestEndpoint(selectedLogId, 'get_csv');
+
+		console.log(`Making HTTP request: ${reqEndpt}`)
+		
+		fetch(reqEndpt)
 			.then(response => {
 				if (!response.ok) {
 					throw new Error(`HTTP error! status: ${response.status}`);
@@ -152,6 +152,7 @@ function updateTable() {
 				// populate table header
 				const thead = logTable.querySelector('thead');
 				const headerRow = document.createElement('tr');
+
 				result.header.forEach((colName, colIdx) => {
 					const th = document.createElement('th');
 					th.textContent = colName;
@@ -162,7 +163,7 @@ function updateTable() {
 					btn1.textContent = '▲';
 					btn1.classList.add('btn-sort');
 					btn1.classList.add('asc');
-					if (parsed_sort_opts.includes(`+${colIdx}`))
+					if (parsedSortOpts.includes(`+${colIdx}`))  // set btn to be active if in `parsedSortOpts`
 						btn1.classList.add('active');
 					btn1.addEventListener('click', (ev) => sortBtnCallback('+', colIdx, ev.currentTarget));
 					th.appendChild(btn1)
@@ -171,7 +172,7 @@ function updateTable() {
 					btn2.textContent = '▼';
 					btn2.classList.add('btn-sort');
 					btn2.classList.add('desc');
-					if (parsed_sort_opts.includes(`-${colIdx}`))
+					if (parsedSortOpts.includes(`-${colIdx}`))  // set btn to be active if in `parsedSortOpts`
 						btn2.classList.add('active');
 					btn2.addEventListener('click', (ev) => sortBtnCallback('-', colIdx, ev.currentTarget));
 					th.appendChild(btn2)
@@ -193,12 +194,12 @@ function updateTable() {
 				});
 
 				// set controls and download link
-				// TODO: work with sorted and filered data
 				controlsDiv.style.display = 'block';
-				downloadLink.href = getRequestEndpoint(selectedLogId, download=true);
-				downloadLink.download = `${selectedLogId}.csv`;
+				downloadLink.href = getRequestEndpoint(selectedLogId, 'download_csv');
+				downloadLink.download = `${selectedLogId}.csv`;  // default suggestion for filename
+				// will be overriden by response from flask app?
 
-				// if unfiltered data, use it to set min and max for date time
+				// if data is unfiltered, use it to set min and max for date time
 				if (!result.filtered) {
 					// convert into formatted timestampts YYYY-mm-DD HH:MM:SS
 					const fmtdTimestamps = result.data.map(row => row[1]).map(tstmp => {
@@ -251,6 +252,7 @@ function updateTable() {
 
 // ========================== helper funcs ==========================
 
-function getRequestEndpoint(logId, download=false) {
-	return (download ? '/download_csv/' : '/get_csv/') + `${logId}?sort=${sortOpts}&filter=${startDatetimeOpt},${endDatetimeOpt}`
+// returns the full request URL str, given a `logId` and the `basePath` of the API endpoint
+function getRequestEndpoint(logId, basePath) {
+	return `/${basePath}/${logId}?sort=${sortOpts}&filter=${startDatetimeOpt},${endDatetimeOpt}`
 }
