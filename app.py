@@ -578,9 +578,7 @@ def generate_plots(log_id):
     plot_opts = parse_opts(request.args.get("plot", None))
 
     # `plot_opts` can contain one or more of:
-    # - time
-    # - level
-    # - event
+    # [events_over_time, level_distribution, event_code_distribution]
 
     # set plot style
     plt.style.use("petroff10")
@@ -599,7 +597,7 @@ def generate_plots(log_id):
         "size": 14,
     }
 
-    if "time" in plot_opts:
+    if "events_over_time" in plot_opts:
         fig, ax = plt.subplots(figsize=(10, 6))
 
         fig.tight_layout()
@@ -651,7 +649,7 @@ def generate_plots(log_id):
         fig.savefig("a.png", format="png", bbox_inches="tight")
         plt.close(fig)
 
-    if "level" in plot_opts:
+    if "level_distributions" in plot_opts:
         # square figure
         fig, ax = plt.subplots(figsize=(8, 8))
 
@@ -678,7 +676,7 @@ def generate_plots(log_id):
         fig.savefig("b.png", format="png", bbox_inches="tight")
         plt.close(fig)
 
-    if "event" in plot_opts:
+    if "event_code_distribution" in plot_opts:
         fig, ax = plt.subplots(figsize=(10, 6))
         
         event_counts = data_df.sort_values(axis=0, by="EventId").value_counts(
