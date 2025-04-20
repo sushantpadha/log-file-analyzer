@@ -1,10 +1,16 @@
 import os
 import subprocess
-import uuid
+# ! only for creating unique file id's based on timestamps
+import datetime, random
+import json
+
+# import threading for spawning plot generation in bg thread
+from threading import Thread
 
 # Using csv and pandas module because customizations are enabled
 import csv
 import pandas as pd
+import numpy as np
 
 from flask import (
     Flask,
@@ -22,7 +28,7 @@ import matplotlib
 # set non-interactive backend, ideal for this use case
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.dates import AutoDateLocator
+from matplotlib.dates import AutoDateLocator, DateFormatter
 from matplotlib.ticker import MaxNLocator
 
 # CONFIGURATION
@@ -32,26 +38,70 @@ DATA_FOLDER = os.path.join(BASE_DIR, "data")
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 PROCESSED_FOLDER = os.path.join(BASE_DIR, "processed")
 PLOT_FOLDER = os.path.join(BASE_DIR, "plots")
+INSTANCE_FOLDER = os.path.join(BASE_DIR, "instance")
 
 PARSE_SCRIPT_PATH = os.path.join(BASE_DIR, "bash", "validate_parse.sh")
 FILTER_SCRIPT_PATH = os.path.join(BASE_DIR, "bash", "filter_by_date.sh")
 
 ALLOWED_EXTENSIONS = {"log"}
 
-# Ensure directories exist
+PLOT_STATUS_FILENAME = "status.json"
+
+PLOT_STATUS_FILEPATH = os.path.join(INSTANCE_FOLDER, PLOT_STATUS_FILENAME)
+
+# ensure directories exist
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 os.makedirs(PLOT_FOLDER, exist_ok=True)
+os.makedirs(INSTANCE_FOLDER, exist_ok=True)
+
+# ensure status files exist
+for f in [
+    PLOT_STATUS_FILEPATH,
+]:
+    open(f, "a").close()
 
 app = Flask(__name__)
 
+# configure folder paths in app config
 app.config["DATA_FOLDER"] = DATA_FOLDER
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["PROCESSED_FOLDER"] = PROCESSED_FOLDER
 app.config["PLOT_FOLDER"] = PLOT_FOLDER
+app.config["INSTANCE_FOLDER"] = INSTANCE_FOLDER
+
+
+################### DEFAULTS ###################
+
+PLOT_TYPES = {
+    "events_over_time",
+    "level_distribution",
+    "event_code_distribution",
+}
+
+EVENT_CODES = {
+    "E1",
+    "E2",
+    "E3",
+    "E4",
+    "E5",
+    "E6",
+}
 
 ############## HELPER FUNCTIONS ################
+
+
+def format_timestamp(csvTimestamp):
+	_, mo, dt, time, yr = csvTimestamp.split(' ')
+
+	month_map = {
+		"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "May": "05", "Jun": "06",
+		"Jul": "07", "Aug": "08", "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"
+	}
+	month = month_map[mo]
+
+	return f'{yr}-{month}-{dt} {time}'
 
 
 def check_filename(filename: str):
@@ -107,9 +157,11 @@ def sort_data(data, opts):
             key = lambda x: int(x[0])
 
         # sort by timestamp/level/content
-        # NOTE: timestamp comparison can be done lexicographically
-        elif field in [1, 2, 3]:
+        elif field in [2, 3]:
             key = lambda x: x[field]
+
+        elif field == 1:
+            key = lambda x: format_timestamp(x[1])
 
         # sort by eventid
         # NOTE: assign empty/undefined eventid as last (in asc order)
@@ -324,11 +376,78 @@ def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
     return csv_fpath
 
 
+def get_csv_metadata(csv_fpath):
+    """Return metadata for CSV as `flask.Response` object of the form:
+    ```
+    {
+        "log_id": "<log_id>",
+        "original_name": "<original_log_name_without_ext>" | "" (if not found),
+        "start_datetime": "<earliest_timestamp>",
+        "end_datetime": "<latest_timestamp>",
+    }
+    ```
+
+    Assumes caller has checked that `csv_fpath` exists.
+
+    Raises exception if `csv_fpath` has zero non-header lines."""
+
+    try:
+        # extract log_id from the file name
+        log_id = os.path.basename(csv_fpath).rsplit(".", 1)[0]
+
+        # retrieve original log name from the corresponding .info file
+        original_name = ""
+        try:
+            with open(
+                os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.info"), "r"
+            ) as f:
+                original_name = f.read().strip().rsplit(".", 1)[0]
+        except FileNotFoundError:
+            pass
+
+        # read the CSV file to extract metadata
+        with open(csv_fpath, "r") as csvfile:
+            csv_reader = csv.reader(csvfile)
+            header = next(csv_reader, None)
+            if not header:
+                raise Exception(f"CSV file {csv_fpath} has no header.")
+
+            timestamps = []
+            for row in csv_reader:
+                if len(row) != len(header):  # basic row validation
+                    raise Exception(f"malformed row in CSV file: {row}")
+                timestamps.append(row[1])  # assuming timestamp is in the second column
+
+            if not timestamps:
+                raise Exception(f"CSV file {csv_fpath} has no data rows.")
+
+            # sort timestamps to find the earliest and latest
+            timestamps = sorted(
+                timestamps,
+                key=lambda x: pd.to_datetime(x, format="%a %b %d %H:%M:%S %Y"),
+            )
+            start_datetime = timestamps[0]
+            end_datetime = timestamps[-1]
+
+        # return metadata as a JSON response
+        return jsonify(
+            {
+                "log_id": log_id,
+                "original_name": original_name,
+                "start_datetime": start_datetime,
+                "end_datetime": end_datetime,
+            }
+        )
+
+    except Exception as e:
+        raise Exception(f"Error extracting metadata from CSV {csv_fpath}: {e}")
+
+
 def parse_csv_request(log_id, request):
     """Returns (`csv_fpath (str)`, `sort_opts (List)`, `filter_opts (List)`)
     given an input `log_id` and `request` object.
 
-    Can raise exception."""
+    Raises exception."""
 
     # check for csv
     csv_fname = f"{log_id}.csv"
@@ -347,6 +466,227 @@ def parse_csv_request(log_id, request):
     filter_opts = parse_opts(request.args.get("filter", None))
 
     return csv_fpath, sort_opts, filter_opts
+
+
+def set_plot_generation_status(status_str, plot_files=None, error_str=None):
+    """Set the plot generation status in `PLOT_STATUS_FILEPATH` with `status_str` and `plot_files` if not `None`.
+
+    Optionally, if error occurs, `error_str` may be passed.
+
+    `status_str` can be one of `['processing','done','error']`
+
+    Caution: This function may raise an exception but isn't handled!"""
+
+    old_status = {}
+
+    # check if file non-empty
+    if os.path.getsize(PLOT_STATUS_FILEPATH) > 0:
+        try:
+            with open(PLOT_STATUS_FILEPATH, "r") as f:
+                old_status = json.load(f)
+        except Exception as e:
+            raise Exception(
+                f"Could not read plot generation status from {PLOT_STATUS_FILEPATH}: {e}"
+            )
+
+    new_status = {
+        "status": status_str,
+        "plot_files": (
+            old_status.get("plot_files", {}) if plot_files is None else plot_files
+        ),
+        "error": error_str if error_str else "",
+    }
+
+    try:
+        with open(PLOT_STATUS_FILEPATH, "w") as f:
+            json.dump(new_status, f)
+    except Exception as e:
+        raise Exception(
+            f"Could not write plot generation status to {PLOT_STATUS_FILEPATH}: {e}"
+        )
+
+
+def generate_plots(data_df, plot_opts, plot_files):
+    """Generate plots based on `data_df` (`pd.DataFrame`), `plot_opts` (`List[str]`) and `plot_files` (`Dict[str, str]`)."""
+    ### set status to processing
+    set_plot_generation_status(status_str="processing", plot_files=plot_files)
+
+    # `plot_opts` can contain one or more of:
+    # [events_over_time, level_distribution, event_code_distribution]
+
+    ### set plot style
+    plt.style.use("petroff10")
+
+    ### define fontdicts for title and labels
+    title_font = {
+        "family": "serif",
+        "color": "black",
+        "weight": "normal",
+        "size": 18,
+    }
+    label_font = {
+        "family": "serif",
+        "color": "black",
+        "weight": "normal",
+        "size": 14,
+    }
+
+    ### generate plots based on type
+
+    try:
+        if "events_over_time" in plot_opts:
+            fig, ax = plt.subplots(figsize=(11, 4))
+
+            fig.tight_layout()
+
+            # ! have to convert timestamps to datetime objects
+            # `pd.to_datetime`: https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html
+            # strptime format: https://docs.python.org/3/library/datetime.html#strftime-and-strptime-behavior
+            dt_series = pd.to_datetime(
+                data_df["Time"], format="%a %b %d %H:%M:%S %Y"
+            )
+
+            # generate full range of timestamps from start to end with step = 1s
+            # https://pandas.pydata.org/docs/reference/api/pandas.date_range.html
+            full_range = pd.date_range(
+                start=dt_series.min(), end=dt_series.max(), freq="s"
+            )
+
+            # count occurrences of each timestamp
+            timestamp_counts = (
+                dt_series.value_counts().reindex(full_range, fill_value=0)
+            )
+
+            # plot the line graph
+
+            # NOTE: uncomment below line to plot only the non-zero occurences (slightly misleading)
+            # NOTE: if you dont, 0 values will also be plotted giving histogram like appearance
+            # timestamp_counts = timestamp_counts[timestamp_counts != 0]
+
+            ax.plot(
+                timestamp_counts.index,
+                timestamp_counts.values,
+                linewidth=1.5,
+            )
+
+            ### set labels and title
+            ax.set_xlabel("Time", fontdict=label_font)
+            ax.set_ylabel("Number of events per second", fontdict=label_font)
+            ax.set_title("Events logged with time (Line Graph)", fontdict=title_font)
+
+            # set auto locator for x-axis with 4 to 14 ticks
+            ax.xaxis.set_major_locator(AutoDateLocator(minticks=4, maxticks=14))
+
+            # format timestamps to original format
+            ax.xaxis.set_major_formatter(DateFormatter("%a %b %d %H:%M:%S %Y"))
+
+            # set y-axis to have only integer ticks
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+            # properly align x-tick labels (rotation + alignment)
+            ax.tick_params(axis="x", rotation=30, labelsize=10, length=5, color="gray")
+            for label in ax.get_xticklabels():
+                label.set_horizontalalignment("right")
+                label.set_verticalalignment("top")
+
+            # adjust y-tick label size
+            ax.tick_params(axis="y", labelsize=10, length=5, color="gray")
+
+            # increase spacing between axes labels and ticks
+            ax.yaxis.labelpad = 30
+            ax.xaxis.labelpad = 30
+
+            ax.grid(True, linestyle="--", alpha=0.8)
+
+            # Save the plot
+            fig.savefig(
+                os.path.join(app.config["PLOT_FOLDER"], plot_files["events_over_time"]),
+                format="png",
+                bbox_inches="tight",
+            )
+            plt.close(fig)
+
+
+        if "level_distribution" in plot_opts:
+            # square figure
+            fig, ax = plt.subplots(figsize=(8, 8))
+
+            event_counts = data_df.sort_values(axis=0, by="Level").value_counts(
+                "Level", sort=False
+            )
+
+            # create the pie chart
+            wedges, texts, autotexts = ax.pie(
+                event_counts.values,
+                labels=event_counts.index,
+                autopct="%1.1f%%",
+                startangle=0,
+                textprops=label_font,
+                pctdistance=0.85,
+            )
+            # style percentage text
+            plt.setp(autotexts, size=12, weight="bold", color="#eee")
+
+            ax.set_title("Level State Distribution", fontdict=title_font, pad=30)
+
+            # ax.axis("equal")
+
+            fig.savefig(
+                os.path.join(
+                    app.config["PLOT_FOLDER"], plot_files["level_distribution"]
+                ),
+                format="png",
+                bbox_inches="tight",
+            )
+            plt.close(fig)
+
+        if "event_code_distribution" in plot_opts:
+            fig, ax = plt.subplots(figsize=(10, 6))
+
+            # get event code wise counts
+            event_counts = data_df.sort_values(axis=0, by="EventId").value_counts(
+                "EventId", sort=False
+            )
+
+            # only keep valid labels
+            event_counts = event_counts.loc[event_counts.index.isin(EVENT_CODES)]
+
+            # create the bar chart
+            bars = ax.bar(event_counts.index, event_counts.values)
+
+            ax.set_xlabel("Event ID", fontdict=label_font)
+            ax.set_ylabel("Number of Occurrences", fontdict=label_font)
+            ax.set_title("Event Code Distribution (E1-E6)", fontdict=title_font)
+
+            # set axes ticks
+            ax.tick_params(axis="x", rotation=0, labelsize=10, length=5, color="gray")
+
+            # set integer spacing for ticks
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.tick_params(axis="y", labelsize=10, length=5, color="gray")
+
+            # adjust label padding
+            ax.yaxis.labelpad = 25
+            ax.xaxis.labelpad = 25
+
+            # add grid lines for yaxis only
+            ax.yaxis.grid(True, linestyle="--", alpha=0.8)
+            ax.xaxis.grid(False)
+
+            fig.savefig(
+                os.path.join(
+                    app.config["PLOT_FOLDER"], plot_files["event_code_distribution"]
+                ),
+                format="png",
+                bbox_inches="tight",
+            )
+            plt.close(fig)
+    except Exception as e:
+        print(e)
+        set_plot_generation_status(status_str="error", plot_files={}, error_str=f"{e}")
+
+    ### set status to done
+    set_plot_generation_status(status_str="done", plot_files=plot_files)
 
 
 ################## ROUTES #####################
@@ -375,11 +715,17 @@ def handle_upload():
         return jsonify({"success": False, "message": "No file selected"}), 400
 
     if file and check_filename(file.filename):
-        original_filename = file.filename  # Keep original name for potential display
-        log_id = str(uuid.uuid4())  # Generate unique ID
+        original_filename = file.filename  # keep original name
+
+        # generate unique ID
+
+        # log_id = str(uuid.uuid4())
+        # id is of form: Year month day hour minute second microseconds 5 random digits (no spaces)
+        log_id = datetime.datetime.today().strftime("%Y%m%d%H%M%S%f") + f"{(random.random()):0.5f}"[2:]
+
         log_filename = f"{log_id}.log"
         csv_filename = f"{log_id}.csv"
-        info_filename = f"{log_id}.info"  # File to store original name
+        info_filename = f"{log_id}.info"  # metadata file to store original name
 
         log_filepath = os.path.join(app.config["UPLOAD_FOLDER"], log_filename)
         csv_filepath = os.path.join(app.config["PROCESSED_FOLDER"], csv_filename)
@@ -481,7 +827,7 @@ def display_page():
 
 
 @app.route("/get_csv/<log_id>")
-def get_csv_endpoint(log_id):
+def get_csv(log_id):
     """Endpoint for serving CSV data for table on display page."""
     try:
         csv_fpath, sort_opts, filter_opts = parse_csv_request(log_id, request)
@@ -492,6 +838,28 @@ def get_csv_endpoint(log_id):
     # get csv data as response
     try:
         response = get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False)
+    except Exception as e:
+        # error is server error
+        return jsonify({"error": f"{e}"}), 500
+
+    return response
+
+
+@app.route("/get_metadata/<log_id>")
+def get_metadata(log_id):
+    """Endpoint for serving metadata for given log id."""
+    log_fpath = os.path.join(app.config["UPLOAD_FOLDER"], f"{log_id}.log")
+    csv_fpath = os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.csv")
+
+    if not os.path.exists(log_fpath):
+        return jsonify({"error": f"log file with id {log_id} does not exist."}), 404
+
+    if not os.path.exists(csv_fpath):
+        return jsonify({"error": f"CSV file with id {log_id} does not exist."}), 404
+
+    # get metadata as response
+    try:
+        response = get_csv_metadata(csv_fpath)
     except Exception as e:
         # error is server error
         return jsonify({"error": f"{e}"}), 500
@@ -551,184 +919,108 @@ def plots_page():
     return render_template("plots.html", available_files=available_files)
 
 
-@app.route("/generate_plots/<log_id>")
-def generate_plots(log_id):
-    """Endpoint for generating plots. Returns response containing plot filename(s)"""
+@app.route("/generate_plots/", methods=["POST"])
+def handle_generate():
+    """Endpoint for generating plots. Returns response containing name of file to query for status."""
+
+    ### process request
+    data = request.get_json()
+    log_id = data.get("log_id")  # str
+    plot_opts = data.get("plot_options")  # list -> set (later)
+    filter_opts = data.get("filter_options")  # str
+
+    print(
+        f"received request with\n\tlog_id: {log_id}\n\tplot_opts: {plot_opts}\n\tfilter_opts: {filter_opts}"
+    )
+
+    ### check `plot_opts` validity
+    try:
+        plot_opts = set(plot_opts)
+        if not plot_opts.issubset(PLOT_TYPES):
+            raise Exception("request contains invalid plot types")
+    except Exception as e:
+        # error is bad request
+        return jsonify({"error": f"{e}"}), 400
 
     ### get csv data for plotting
     try:
-        csv_fpath, sort_opts, filter_opts = parse_csv_request(log_id, request)
+        # only `csv_fpath` can be extracted here
+        csv_fpath, _, _ = parse_csv_request(log_id, request)
+        # `filter_opts` to be parsed here
+        filter_opts = parse_opts(filter_opts)
     except Exception as e:
         # error is FileNotFound
         return jsonify({"error": f"{e}"}), 404
 
     try:
-        response: flask.Response = get_csv_data(
-            csv_fpath, sort_opts, filter_opts, for_download=False
-        )
+        response = get_csv_data(csv_fpath, None, filter_opts, for_download=False)
+        # since `get_csv_data` returns `flask.Response` we first convert `pd.DataFrame`
+        data = response.get_json()
+        data_df = pd.DataFrame(data=data["data"], columns=data["header"])
+
     except Exception as e:
         # error is server error
         return jsonify({"error": f"{e}"}), 500
 
-    ### pandas for processing
-    data = response.get_json()
-    data_df = pd.DataFrame(data=data["data"], columns=data["header"])
+    ### generate plot file names here itself as `{plot_type}: {log_id}_{plot_type}.png`
+    plot_files = {p: f"{log_id}_{p}.png" for p in plot_opts}
 
-    ### make desired plot
-    plot_opts = parse_opts(request.args.get("plot", None))
+    ### spawn thread for generating plot
+    # ref: https://docs.python.org/3/library/threading.html#threading.Thread
+    Thread(target=generate_plots, args=(data_df, plot_opts, plot_files)).start()
 
-    # `plot_opts` can contain one or more of:
-    # [events_over_time, level_distribution, event_code_distribution]
-
-    # set plot style
-    plt.style.use("petroff10")
-
-    # define fontdicts for title and labels
-    title_font = {
-        "family": "serif",
-        "color": "black",
-        "weight": "normal",
-        "size": 18,
-    }
-    label_font = {
-        "family": "serif",
-        "color": "black",
-        "weight": "normal",
-        "size": 14,
-    }
-
-    if "events_over_time" in plot_opts:
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        fig.tight_layout()
-
-        # `pd.to_datetime`: https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html
-        # strptime format: https://docs.python.org/3/library/datetime.html#strftime-and-strptime-behavior
-        timestamps = data_df.sort_values(
-            axis=0,
-            by="Time",
-            key=lambda x: pd.to_datetime(x, format="%a %b %d %H:%M:%S %Y"),
-        ).value_counts("Time", sort=False)
-
-        ax.plot(
-            timestamps.index,
-            timestamps.values,
-            marker=".",
-            linestyle="-",
-            markersize=5,
-            linewidth=1.5,
-        )
-
-        ### set labels and title
-        ax.set_xlabel("Time", fontdict=label_font)
-        ax.set_ylabel("Number of events per second", fontdict=label_font)
-        ax.set_title("Events logged with time", fontdict=title_font)
-
-        # set auto locator for x-axis with 5 to 10 ticks
-        locator = AutoDateLocator(minticks=5, maxticks=10)
-        ax.xaxis.set_major_locator(locator)
-
-        # set y-axis to have only integer ticks
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-
-        # properly align x-tick labels (rotation + alignment)
-        ax.tick_params(axis="x", rotation=30, labelsize=10, length=5, color="gray")
-        for label in ax.get_xticklabels():
-            label.set_horizontalalignment("right")
-            label.set_verticalalignment("top")
-
-        # adjust y-tick label size
-        ax.tick_params(axis="y", labelsize=10, length=5, color="gray")
-
-        # increase spacing between axes labels and ticks
-        ax.yaxis.labelpad = 30
-        ax.xaxis.labelpad = 30
-
-        ax.grid(True, linestyle="--", alpha=0.8)
-
-        fig.savefig("a.png", format="png", bbox_inches="tight")
-        plt.close(fig)
-
-    if "level_distributions" in plot_opts:
-        # square figure
-        fig, ax = plt.subplots(figsize=(8, 8))
-
-        event_counts = data_df.sort_values(axis=0, by="Level").value_counts(
-            "Level", sort=False
-        )
-
-        # create the pie chart
-        wedges, texts, autotexts = ax.pie(
-            event_counts.values,
-            labels=event_counts.index,
-            autopct="%1.1f%%",
-            startangle=0,
-            textprops=label_font,
-            pctdistance=0.85,
-        )
-        # style percentage text
-        plt.setp(autotexts, size=12, weight="bold", color="#eee")
-
-        ax.set_title("Level State Distribution", fontdict=title_font, pad=30)
-
-        # ax.axis("equal")
-
-        fig.savefig("b.png", format="png", bbox_inches="tight")
-        plt.close(fig)
-
-    if "event_code_distribution" in plot_opts:
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        event_counts = data_df.sort_values(axis=0, by="EventId").value_counts(
-            "EventId", sort=False
-        ).drop(labels="")
-
-        # create the bar chart
-        bars = ax.bar(event_counts.index, event_counts.values)
-
-        ax.set_xlabel("Event ID", fontdict=label_font)
-        ax.set_ylabel("Number of Occurrences", fontdict=label_font)
-        ax.set_title("Event Code Distribution (E1-E6)", fontdict=title_font)
-
-        # set axes ticks
-        ax.tick_params(axis="x", rotation=0, labelsize=10, length=5, color='gray')
-
-        # set integer spacing for ticks
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.tick_params(axis="y", labelsize=10, length=5, color='gray')
-
-        # adjust label padding
-        ax.yaxis.labelpad = 25
-        ax.xaxis.labelpad = 25
-
-        # add grid lines for yaxis only
-        ax.yaxis.grid(True, linestyle="--", alpha=0.8)
-        ax.xaxis.grid(False)
-
-        fig.savefig("c.png", format="png", bbox_inches="tight")
-        plt.close(fig)
-
-    return response
+    ### return response containing file containing the status
+    return jsonify({"status_file": PLOT_STATUS_FILEPATH})
 
 
-@app.route("/plots/<plot_filename>")
-def get_plot(plot_filename):
-    """Serves a generated plot image."""
+@app.route("/status")
+def get_status():
     try:
-        return send_from_directory(app.config["PLOT_FOLDER"], plot_filename)
-    except FileNotFoundError:
-        abort(404, description="Plot image not found.")
+        if os.path.getsize(PLOT_STATUS_FILEPATH) > 0:
+            with open(PLOT_STATUS_FILEPATH, "r") as f:
+                return jsonify(json.load(f))
+        else:
+            return jsonify({"status": "idle"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": "Status file unreadable."}), 500
 
 
-@app.route("/download_plot/<plot_filename>")
-def download_plot(plot_filename):
-    """Provides a generated plot image for download."""
+@app.route("/get_plot/<plot>")
+def get_plot(plot):
+    """Endpoint for serving plot files"""
     try:
         return send_from_directory(
             app.config["PLOT_FOLDER"],
-            plot_filename,
-            as_attachment=True,
-            # download_name can be set here if desired, e.g., based on log_id/type
+            plot,
         )
+    except Exception as e:
+        return jsonify({"error": f"Plot file {plot} not found."}), 500
+
+
+@app.route("/download_plot/<plot>")
+def download_plot(plot):
+    """Endpoint for serving plot files for download"""
+
+    log_id, plot_type_w_ext = plot.split("_", maxsplit=1)[:]
+
+    # retrieve original filename for download suggestion
+    original_name = "download"  # default
+    try:
+        with open(
+            os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.info"), "r"
+        ) as f:
+            original_name = f.read().strip().rsplit(".", 1)[0]  # use log name part
     except FileNotFoundError:
-        abort(404, description="Plot image not found.")
+        pass
+
+    download_filename = f"{original_name}_{plot_type_w_ext}"
+
+    try:
+        return send_from_directory(
+            app.config["PLOT_FOLDER"],
+            plot,
+            as_attachment=True,
+            download_name=download_filename,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Plot file {plot} not found."}), 500
