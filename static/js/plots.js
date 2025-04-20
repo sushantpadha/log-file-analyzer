@@ -1,47 +1,83 @@
+import {
+	parseDatetimeInputs,
+	validateFilterDates,
+	setFilterOpts,
+	resetFilterOpts,
+	getPlotRequest,
+	getPlotStatusRequestURL,
+	getPlotURL,
+	getMetadataRequestURL,
+	setFilterRange,
+	fmtTimestamp,
+	resetFilterValues,
+} from "./utils.js";
+
 const selectEl = document.getElementById('log-select-plot');
 const optionsDiv = document.getElementById('plot-options');
 
-const plotDisplayContainer = document.getElementById('plots-display-container'); // parent el
+const plotDisplayContainer = document.getElementById('plot-display-container'); // parent el
 const loadingMessage = document.getElementById('plot-loading-message');
 const errorMessage = document.getElementById('plot-error-message');
-const plotDisplayArea = document.getElementById('plots-display-area'); // only plots displayed here
+const plotDisplayArea = document.getElementById('plot-display-area'); // only plots displayed here
 
 const genPlotsBtn = document.getElementById('generate-plots-btn');
 // returns NodeList of all plot options elements
 const plotTypeCheckboxes = document.querySelectorAll('input[name="plot_type"]');
 
-// add listener for `selectEl` to `updateOptionsDiv`
 
-// add (HTML and) listener for submit button on filter input controls
+const filterApplyBtn = document.getElementById('filter-apply-btn');
+const filterResetBtn = document.getElementById('filter-reset-btn');
 
-// add listener to `generatePlots` for constructing and sending API request and call `displayPlots`
+document.addEventListener('DOMContentLoaded', updateOptionsDiv);
+selectEl.addEventListener('change', updateOptionsDiv);
 
-// change the `plotDisplayArea` to show processing
+filterApplyBtn.addEventListener('click', filterBtnCallback);
 
-// when `displayPlots` receives response, update `plotDisplayArea` to display desired plots and update download buttons
-
-selectEl.addEventListener('click', updateOptionsDiv);
+filterResetBtn.addEventListener('click', () => {
+	resetFilterOpts();
+	_resetFilterOpts();
+});
 
 genPlotsBtn.addEventListener('click', generatePlots);
 
+// =================== eventlistener callback funcs =================
+
+// parse filter data, update date global vars and call `updateTable`
+function filterBtnCallback() {
+	// parse
+	const { startDatetime, endDatetime } = parseDatetimeInputs()
+
+	// validate
+	if (!validateFilterDates(startDatetime, endDatetime)) {
+		return;
+	}
+
+	// set global vars
+	setFilterOpts(startDatetime, endDatetime);
+}
+
+// toggle displaying of options div, reset value and set limits for filter inputs
 function updateOptionsDiv() {
-	if (selectEl.value) {
-		optionsDiv.style.display = 'block';
+	const selectedLogId = selectEl.value;
+	if (selectedLogId) {
+		optionsDiv.style.display = 'flex';
 	}
 	else {
 		optionsDiv.style.display = 'none';
+		return;
 	}
+
+	_resetFilterOpts();
 }
 
-// TODO: filtering
-
+// send request for plot generation, query status and populate plots div with response
 function generatePlots() {
 	// parse plot options
 
-	// filter checked > extract values > join as ,-separated str
+	// filter checked > extract values (as array)
 	const plotOpts = Array.from(plotTypeCheckboxes)
 		.filter(node => node.checked)
-		.map(node => node.value).join(',');
+		.map(node => node.value)
 
 	// TODO: inc filtering opts
 
@@ -53,15 +89,17 @@ function generatePlots() {
 	loadingMessage.style.display = 'none';
 	errorMessage.style.display = 'none';
 
+	// if invalid log id is passed
 	if (!selectedLogId) {
-		// TODO: error
+		return;
 	}
 
-	const reqURL = getRequestURL(selectedLogId, 'generate_plots');
+	const { endpoint, payload } = getPlotRequest(selectedLogId, plotOpts);
 
-	console.log(`Making HTTP request: ${reqURL}`)
+	console.log(`Sending @ ${endpoint} payload: ${payload.body}`)
 
-	fetch(reqURL)
+	// make request to generate plots
+	fetch(endpoint, payload)
 		.then(response => {
 			if (!response.ok) {
 				throw new Error(`HTTP error! status: ${response.status}`);
@@ -79,18 +117,127 @@ function generatePlots() {
 			// display loading message
 			loadingMessage.style.display = 'block';
 
-			// receive response for plot filenames, that will be sent in subsequent request
-			
-		});
+			// receive response for status file which will be queried for job status and plot filenames
+			// const statusPath = result.status_file;
 
+			// set max attempts as 60 (60 * 500ms = 30s)
+			let attempts = 0;
+			const maxAttempts = 60;
+
+			// query every 500 ms
+			const interval = setInterval(() => {
+				attempts++;
+
+				// request for url
+				fetch(getPlotStatusRequestURL())
+					.then(response => {
+						if (!response.ok) {
+							throw new Error(`Error requesting job status file! status: ${response.status}`);
+						}
+						return response.json();
+					})
+					.then(result => {
+						// error handling
+						if (result.error) {
+							errorMessage.textContent = `Error in plot generation / status file I/O: ${result.error}`;
+							errorMessage.style.display = 'block';
+							return;
+						}
+
+						// if done processing
+						if (result.status == 'done') {
+							// stop looping
+							clearInterval(interval);
+
+							// remove loading msg
+							loadingMessage.style.display = 'none';
+
+							// populate plots div
+							Object.entries(result.plot_files).forEach(([type, file]) => {
+
+								const plotDiv = document.createElement('div');
+								plotDiv.classList.add('plot-container');
+
+								const plotImg = document.createElement('img');
+								plotImg.classList.add('plot-image');
+								// simply set src to point to plot file path
+								plotImg.src = getPlotURL(file);
+
+								const plotDLLink = document.createElement('a');
+								plotDLLink.classList.add('plot-dl-link');
+								plotDLLink.textContent = "Download Plot";
+
+								plotDLLink.href = getPlotURL(file, true);
+								plotDLLink.download = file
+
+								plotDiv.appendChild(plotImg);
+								plotDiv.appendChild(plotDLLink);
+
+								plotDisplayArea.appendChild(plotDiv);
+							});
+
+							// hide loading area
+							loadingMessage.style.display = 'none';
+
+							// show plots
+							plotDisplayArea.style.display = 'flex';
+
+						}
+					})
+
+				if (attempts >= maxAttempts) {
+					clearInterval(interval);
+					// ! raise error after timeout
+					loadingMessage.style.display = 'none';
+					errorMessage.textContent = `Error requesting job status file! Request timed out.`;
+					errorMessage.style.display = 'block';
+					console.error(`Error requesting job status file! Request timed out.`);
+				}
+			}, 500)
+		})
+		.catch(error => {
+			loadingMessage.style.display = 'none';
+			errorMessage.textContent = `Error generating plots / fetching status: ${error}`;
+			errorMessage.style.display = 'block';
+			console.error('Error generating plots / fetching status:', error);
+		});
 }
 
+function _resetFilterOpts() {
+	const selectedLogId = selectEl.value;
 
+	fetch(getMetadataRequestURL(selectedLogId))
+		.then(response => {
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+			return response.json();
+		})
+		.then(result => {
+			// error handling
+			if (result.error) {
+				errorMessage.textContent = `Error loading data: ${result.error}`;
+				errorMessage.style.display = 'block';
+				return;
+			}
 
+			// extract formatted timestamps
+			const start = fmtTimestamp(result.start_datetime);
+			const end = fmtTimestamp(result.end_datetime);
 
+			console.log(`setting range ${start} ${end}`)
 
+			// set limits
+			setFilterRange(start, end);
 
-// returns the full request URL str, given a `logId` and the `basePath` of the API endpoint
-function getRequestURL(logId, basePath) {
-	return `/${basePath}/${logId}?sort=${sortOpts}&filter=${startDatetimeOpt},${endDatetimeOpt}`
+			// and defaults
+			setFilterOpts(start, end);
+			resetFilterValues();
+		})
+		.catch(error => {
+			loadingMessage.style.display = 'none';
+			errorMessage.textContent = `Error generating plots / fetching status: ${error}`;
+			errorMessage.style.display = 'block';
+			console.error('Error generating plots / fetching status:', error);
+		});
 }

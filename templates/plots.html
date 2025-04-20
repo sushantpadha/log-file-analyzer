@@ -4,52 +4,144 @@
 
 {% block head_extra %}
 <style>
+    /* place the controls side by side using flex and flex-wrap */
+    #plot-options {
+        display: flex;
+        gap: 1em;
+        margin-top: 1em;
+        /* https://developer.mozilla.org/en-US/docs/Web/CSS/flex-wrap */
+        flex-wrap: wrap;
+    }
+
+    #plot-controls,
+    #filter-controls {
+        /* https://developer.mozilla.org/en-US/docs/Web/CSS/flex */
+        flex: 1 1 300px;
+        padding: 1em;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        background-color: #f9f9f9;
+    }
+
+    #plot-controls legend,
+    #filter-controls legend {
+        font-weight: bold;
+        margin-bottom: 0.5em;
+        color: rgb(67, 67, 67);
+    }
+
+    #plot-controls div,
+    #filter-controls div {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.5em;
+    }
+
+    #plot-loading-message,
+    #plot-error-message {
+        padding: 10px;
+    }
+
+    #plot-display-area {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        padding-top: 20px;
+    }
+
+    .plot-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        margin-bottom: 40px;
+    }
+
+    .plot-image {
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        /* subtle shadow */
+        /* limit image size keeping to aspect ratio */
+        max-width: 830px;
+        width: auto;
+        height: auto;
+    }
+
+    .plot-dl-link {
+        background-color: #bbb;
+        color: #333;
+        padding: 8px;
+        border: 1px #bbb solid;
+        margin: 15px;
+        border-radius: 6px;
+    }
+
+    .plot-dl-link:hover {
+        background-color: #bbbbbb8b;
+        text-decoration: none;
+    }
 </style>
+
 {% endblock %}
 
 {% block content %}
-    <h1>Generate Plots</h1>
+<h1>Generate Plots</h1>
 
-    {% if available_files %}
-        <label for="log-select-plot">Select Log File:</label>
-        <select id="log-select-plot">
-            <option value="">-- Select a File --</option>
-            {% for file_id, orig_name in available_files.items() %}
-                <option value="{{ file_id }}">{{ orig_name }} (ID: {{ file_id }})</option>
-            {% endfor %}
-        </select>
+{% if available_files %}
+<label for="log-select-plot">Select Log File:</label>
+<select id="log-select-plot">
+    <option value="">-- Select a File --</option>
+    {% for file_id, orig_name in available_files.items() %}
+    <option value="{{ file_id }}">{{ orig_name }} (ID: {{ file_id }})</option>
+    {% endfor %}
+</select>
 
-        <div id="plot-options" style="margin-top: 15px; display: none;">
-             <fieldset>
-                 <legend>Select Plot Types (Apache Logs):</legend>
-                 <div>
-                     <input type="checkbox" id="plot-time" name="plot_type" value="events_over_time" checked>
-                     <label for="plot-time">Events logged with time (Line)</label>
-                 </div>
-                 <div>
-                     <input type="checkbox" id="plot-level" name="plot_type" value="level_distribution">
-                     <label for="plot-level">Level State Distribution (Pie)</label>
-                 </div>
-                 <div>
-                     <input type="checkbox" id="plot-eventcode" name="plot_type" value="event_code_distribution">
-                     <label for="plot-eventcode">Event Code Distribution (Bar)</label>
-                 </div>
-                 
-                 <button class="green-btn" id="generate-plots-btn" style="margin-top: 10px;">Generate Plots</button>
-             </fieldset>
+<div id="plot-options" style="display: none;">
+    <fieldset id="plot-controls">
+        <legend>Select Plot Types (Apache Logs):</legend>
+        <div>
+            <input type="checkbox" id="plot-events_over_time" name="plot_type" value="events_over_time" checked>
+            <label for="plot-events_over_time">Events logged with time (Line)</label>
+        </div>
+        <div>
+            <input type="checkbox" id="plot-level_distribution" name="plot_type" value="level_distribution">
+            <label for="plot-level_distribution">Level State Distribution (Pie)</label>
+        </div>
+        <div>
+            <input type="checkbox" id="plot-event_code_distribution" name="plot_type" value="event_code_distribution">
+            <label for="plot-event_code_distribution">Event Code Distribution (Bar)</label>
         </div>
 
-        <div id="plots-display-container" style="margin-top: 20px;">
-            <p id="plot-loading-message" style="display: none;">Generating plots...</p>
-            <p id="plot-error-message" style="color: red; display: none;"></p>
-            <div id="plots-display-area" style="display: none;"></div>
+        <button class="green-btn" id="generate-plots-btn">Generate Plots</button>
+    </fieldset>
+
+    <fieldset id="filter-controls">
+        <legend>Select Filter Range:</legend>
+        {% include 'filter_controls.html' %}
+    </fieldset>
+</div>
+
+<div id="plot-display-container">
+    <p id="plot-loading-message" style="display: none;">Generating plots...</p>
+    <p id="plot-error-message" style="color: red; display: none;"></p>
+    <div id="plot-display-area" style="display: none;">
+        <!-- Sample for HTML generated by js
+
+        <div class="plot-container">
+            <img class="plot-image" src="/get_plot/cbf3a56d-5488-4956-9cc6-180448a654c8_events_over_time.png">
+            <a class="plot-dl-link">Download Plot</a>
         </div>
 
-    {% else %}
-        <p>No processed log files available. Please <a href="{{ url_for('upload_page') }}">upload</a> some files first.</p>
-    {% endif %}
+    -->
+
+    </div>
+</div>
+
+{% else %}
+<p>No processed log files available. Please <a href="{{ url_for('upload_page') }}">upload</a> some files first.</p>
+{% endif %}
 {% endblock %}
 
 {% block scripts_extra %}
-     <script src="{{ url_for('static', filename='js/plots.js') }}"></script> {# Placeholder #}
+<script type="module" src="{{ url_for('static', filename='js/plots.js') }}"></script>
 {% endblock %}
