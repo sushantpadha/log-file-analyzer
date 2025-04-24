@@ -92,6 +92,88 @@ EVENT_CODES = {
 
 ############## HELPER FUNCTIONS ################
 
+def seconds_from_timestamp(timestamp):
+    """Return number of seconds elapsed between `timestamp` wrt 0001-01-01 00:00:00"""
+    timestamp = format_timestamp(timestamp)
+
+    def to_seconds(tstmp):
+        if not tstmp:
+            return 0
+        
+        d, t = tstmp.split()
+        yr, mo, day = map(int, d.split('-'))
+        hr, mn, sc  = map(int, t.split(':'))
+
+        days_in_month = [
+            31,
+            28 + (1 if (yr % 4 == 0 and (yr % 100 != 0 or yr % 400 == 0)) else 0),
+            31, 30, 31, 30,
+            31, 31, 30, 31,
+            30, 31,
+        ]
+
+        # 1) days from all years before this one (leaps = (N-1)//4 - (N-1)//100 + (N-1)//400)
+        years_prior = yr - 1
+        leaps_prior = (years_prior // 4
+                    - years_prior // 100
+                    + years_prior // 400)
+        days_prior_years = years_prior * 365 + leaps_prior
+
+        # 2) days from all months earlier in this year
+        days_prior_months = sum(days_in_month[: mo - 1])
+
+        # 3) days before the current day
+        days_prior_days = day - 1
+
+        total_days = days_prior_years + days_prior_months + days_prior_days
+
+        # 4) convert to seconds
+        total_seconds = total_days * 86400 + hr * 3600 + mn * 60 + sc
+
+        return total_seconds
+    
+    return to_seconds(timestamp)
+
+
+def timestamp_from_seconds(total_seconds):
+    """Convert seconds since 0001-01-01 00:00:00 to YYYY-mm-DD HH:MM:SS"""
+    # 1) break into days and seconds within the day
+    days = total_seconds // 86400
+    rem  = total_seconds % 86400
+    hr   = rem // 3600
+    rem  %= 3600
+    mn   = rem // 60
+    sc   = rem % 60
+
+    # 2) convert total days into year / month / day
+    # start from year 1 and add year lengths until remaining days is within the year
+    year = 1
+    while True:
+        is_leap = (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0))
+        days_in_year = 366 if is_leap else 365
+        if days < days_in_year:
+            break
+        days -= days_in_year
+        year += 1
+
+    days_in_month = [
+        31,
+        28 + (1 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 0),
+        31, 30, 31, 30,
+        31, 31, 30, 31,
+        30, 31,
+    ]
+    month = 1
+    for dim in days_in_month:
+        if days < dim:
+            break
+        days -= dim
+        month += 1
+
+    day = days + 1
+
+    return f"{year:04d}-{month:02d}-{day:02d} {hr:02d}:{mn:02d}:{sc:02d}"
+
 
 def format_timestamp(csvTimestamp):
     _, mo, dt, time, yr = csvTimestamp.split(" ")
@@ -610,6 +692,17 @@ def generate_plots(data_df, plot_opts, plot_files):
     """Generate plots based on `data_df` (`pd.DataFrame`), `plot_opts` (`List[str]`) and `plot_files` (`Dict[str, str]`)."""
     ### set status to processing
     set_plot_generation_status(status_str="processing", plot_files=plot_files)
+
+    def get_counts_dict(data, key):
+        """Returns counts of items summed over all rows of `data`, where items are extracted using func `key`."""
+        counts = {}
+        for row in data:
+            value = key(data)
+            if value not in counts:
+                counts[value] = 1
+            else:
+                counts[value] += 1
+        return counts
 
     # `plot_opts` can contain one or more of:
     # [events_over_time, level_distribution, event_code_distribution]
