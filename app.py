@@ -1,7 +1,8 @@
 import os
 import subprocess
 # ! only for creating unique file id's based on timestamps
-import datetime, random
+import random
+from time import time
 import json
 
 # import threading for spawning plot generation in bg thread
@@ -46,8 +47,10 @@ FILTER_SCRIPT_PATH = os.path.join(BASE_DIR, "bash", "filter_by_date.sh")
 ALLOWED_EXTENSIONS = {"log"}
 
 PLOT_STATUS_FILENAME = "status.json"
+FILE_METADATA_FILENAME = "metadata.json"
 
 PLOT_STATUS_FILEPATH = os.path.join(INSTANCE_FOLDER, PLOT_STATUS_FILENAME)
+FILE_METADATA_FILEPATH = os.path.join(INSTANCE_FOLDER, FILE_METADATA_FILENAME)
 
 # ensure directories exist
 os.makedirs(DATA_FOLDER, exist_ok=True)
@@ -56,9 +59,9 @@ os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 os.makedirs(PLOT_FOLDER, exist_ok=True)
 os.makedirs(INSTANCE_FOLDER, exist_ok=True)
 
-# ensure status files exist
+# ensure instance files exist
 for f in [
-    PLOT_STATUS_FILEPATH,
+    PLOT_STATUS_FILEPATH, FILE_METADATA_FILEPATH
 ]:
     open(f, "a").close()
 
@@ -104,7 +107,7 @@ def format_timestamp(csvTimestamp):
 	return f'{yr}-{month}-{dt} {time}'
 
 
-def check_filename(filename: str):
+def validate_filename(filename: str):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
@@ -305,6 +308,102 @@ def parse_opts(opts: str):
     return None
 
 
+def parse_csv(filepath):
+    """Parse CSV file (handles quoted fields and escaped double quotes)
+    
+    Assumes file exists.
+
+    Returns header (`List[str]`) and data (`List[List[str]]`).
+    """
+
+    data = []
+
+    with open(filepath, 'r') as f:
+        row = []
+        field = ''
+        in_quotes = False
+        # read char
+        while True:
+            char = f.read(1)
+            # EOF
+            if not char:
+                # append current field and row if non-empty
+                if field or row:
+                    row.append(field)
+                    data.append(row)
+                break
+
+            # quoting begins
+            if char == '"':
+                # this can be:
+                # - start of escaped quote
+                # - start of new quoted field
+                # - end of a quoted field
+
+                if in_quotes:
+                    next_char = f.read(1)
+                    # escaped quote
+                    if next_char == '"':
+                        field += '"'
+                    else:
+                        # end of quoted field
+                        in_quotes = False
+                        if next_char:
+                            # end of non-final quoted field
+                            if next_char == ',':
+                                row.append(field)
+                                field = ''
+                            # end of final quoted field
+                            elif next_char == '\n':
+                                row.append(field)
+                                data.append(row)
+                                row = []
+                                field = ''
+                            # start of quoted field
+                            else:
+                                field += next_char
+                # start of quoted field
+                else:
+                    in_quotes = True
+
+            # read comma not in quotes
+            elif char == ',' and not in_quotes:
+                row.append(field)
+                field = ''
+
+            # read EOL not in quotes
+            elif char == '\n' and not in_quotes:
+                row.append(field)
+                data.append(row)
+                row = []
+                field = ''
+
+            # any other case read literally
+            else:
+                field += char
+
+    if not data:
+        header, _data = [], []
+    else:
+        header = data[0]
+        _data = data[1:] if len(data) > 1 else []
+
+    return header, _data
+
+
+def validate_csv_data(header, data):
+    """Given header and data, validates CSV data, and raises exceptions if any errors found."""
+    
+    if not header:
+        raise Exception(f"Empty csv file/header")
+
+    for row in data:
+        if len(row) != len(header):  # basic check
+            raise Exception(f"Malformed row in CSV file: {row}")
+    
+    return True
+
+
 def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
     """Return CSV data (as `flask.Response` via `jsonify`),
     or, path (`str`) to filtered csv (if `for_download=True`) for given `log_id` with sort and filter opts.
@@ -340,19 +439,11 @@ def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
 
     # otherwise, either data is required or fpath is (with sorted data)
     try:
-        header = []
-        data = []
-        # read csv data
-        with open(csv_fpath, "r") as csvfile:
-            csv_reader = csv.reader(csvfile)
-            header = next(csv_reader, None)
-            if not header:
-                raise Exception(f"Empty csv file/header")
-
-            for row in csv_reader:
-                if len(row) != len(header):  # basic check
-                    raise Exception(f"Malformed row in CSV file: {row}")
-                data.append(row)
+        # parse csv
+        header, data = parse_csv(csv_fpath)
+        
+        # validate
+        validate_csv_data(header, data)
 
         # sort data
         data = sort_data(data, sort_opts)
@@ -705,7 +796,8 @@ def upload_page():
 
 @app.route("/upload", methods=["POST"])
 def handle_upload():
-    """Handles file uploads via AJAX."""
+    """Handles file uploads."""
+    # error handling
     if "log_file" not in request.files:
         return jsonify({"success": False, "message": "No file part in request"}), 400
 
@@ -714,14 +806,13 @@ def handle_upload():
     if file.filename == "":
         return jsonify({"success": False, "message": "No file selected"}), 400
 
-    if file and check_filename(file.filename):
-        original_filename = file.filename  # keep original name
+    if file and validate_filename(file.filename):
+        original_filename = file.filename
 
         # generate unique ID
 
         # log_id = str(uuid.uuid4())
-        # id is of form: Year month day hour minute second microseconds 5 random digits (no spaces)
-        log_id = datetime.datetime.today().strftime("%Y%m%d%H%M%S%f") + f"{(random.random()):0.5f}"[2:]
+        log_id = str(time() * 10 ** 6)[:15] + f"{(random.random()):0.5f}"[2:]
 
         log_filename = f"{log_id}.log"
         csv_filename = f"{log_id}.csv"
