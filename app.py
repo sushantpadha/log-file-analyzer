@@ -1,5 +1,6 @@
 import os
 import subprocess
+
 # ! only for creating unique file id's based on timestamps
 import random
 from time import time
@@ -9,7 +10,6 @@ import json
 from threading import Thread
 
 # Using csv and pandas module because customizations are enabled
-import csv
 import pandas as pd
 import numpy as np
 
@@ -60,9 +60,7 @@ os.makedirs(PLOT_FOLDER, exist_ok=True)
 os.makedirs(INSTANCE_FOLDER, exist_ok=True)
 
 # ensure instance files exist
-for f in [
-    PLOT_STATUS_FILEPATH, FILE_METADATA_FILEPATH
-]:
+for f in [PLOT_STATUS_FILEPATH, FILE_METADATA_FILEPATH]:
     open(f, "a").close()
 
 app = Flask(__name__)
@@ -96,15 +94,25 @@ EVENT_CODES = {
 
 
 def format_timestamp(csvTimestamp):
-	_, mo, dt, time, yr = csvTimestamp.split(' ')
+    _, mo, dt, time, yr = csvTimestamp.split(" ")
 
-	month_map = {
-		"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "May": "05", "Jun": "06",
-		"Jul": "07", "Aug": "08", "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"
-	}
-	month = month_map[mo]
+    month_map = {
+        "Jan": "01",
+        "Feb": "02",
+        "Mar": "03",
+        "Apr": "04",
+        "May": "05",
+        "Jun": "06",
+        "Jul": "07",
+        "Aug": "08",
+        "Sep": "09",
+        "Oct": "10",
+        "Nov": "11",
+        "Dec": "12",
+    }
+    month = month_map[mo]
 
-	return f'{yr}-{month}-{dt} {time}'
+    return f"{yr}-{month}-{dt} {time}"
 
 
 def validate_filename(filename: str):
@@ -113,33 +121,30 @@ def validate_filename(filename: str):
 
 def get_processed_files():
     """Returns a dictionary of processed files {log_id: original_filename}. Note, files of form '*.processed.csv' are to be ignored."""
+
+    # go through all files from processed folder and validate from metadata file
     processed = {}
     try:
         for filename in os.listdir(app.config["PROCESSED_FOLDER"]):
             if filename.endswith(".csv") and not filename.endswith(".processed.csv"):
                 log_id = filename.rsplit(".", 1)[0]
-                # find the corressponding metadata file and read it to get original log file name
+
+                # read the metadata for original name
                 original_name = f"Log {log_id}"  # placeholder name
                 try:
-                    with open(
-                        os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.info"),
-                        "r",
-                    ) as f:
-                        original_name = f.read().strip()
-                except FileNotFoundError:
-                    pass  # keep placeholder
+                    md = get_csv_metadata(log_id)
+                    original_name = (
+                        md["original_name"] if md["original_name"] else original_name
+                    )
+                except Exception as e:
+                    print(e)
 
                 processed[log_id] = original_name
-    # if directory doesn't exist
-    except FileNotFoundError:
-        print(
-            f"Warning: Processed folder not found at {app.config['PROCESSED_FOLDER']}"
-        )
-        return {}
-    # any other errors
+
     except Exception as e:
         print(f"Error scanning processed folder: {e}")
         return {}
+
     return processed
 
 
@@ -310,17 +315,17 @@ def parse_opts(opts: str):
 
 def parse_csv(filepath):
     """Parse CSV file (handles quoted fields and escaped double quotes)
-    
-    Assumes file exists.
+
+    Assumes file exists. Assumes LF endings(?)
 
     Returns header (`List[str]`) and data (`List[List[str]]`).
     """
 
     data = []
 
-    with open(filepath, 'r') as f:
+    with open(filepath, "r") as f:
         row = []
-        field = ''
+        field = ""
         in_quotes = False
         # read char
         while True:
@@ -350,15 +355,15 @@ def parse_csv(filepath):
                         in_quotes = False
                         if next_char:
                             # end of non-final quoted field
-                            if next_char == ',':
+                            if next_char == ",":
                                 row.append(field)
-                                field = ''
+                                field = ""
                             # end of final quoted field
-                            elif next_char == '\n':
+                            elif next_char == "\n":
                                 row.append(field)
                                 data.append(row)
                                 row = []
-                                field = ''
+                                field = ""
                             # start of quoted field
                             else:
                                 field += next_char
@@ -367,16 +372,16 @@ def parse_csv(filepath):
                     in_quotes = True
 
             # read comma not in quotes
-            elif char == ',' and not in_quotes:
+            elif char == "," and not in_quotes:
                 row.append(field)
-                field = ''
+                field = ""
 
             # read EOL not in quotes
-            elif char == '\n' and not in_quotes:
+            elif char == "\n" and not in_quotes:
                 row.append(field)
                 data.append(row)
                 row = []
-                field = ''
+                field = ""
 
             # any other case read literally
             else:
@@ -391,21 +396,39 @@ def parse_csv(filepath):
     return header, _data
 
 
+def write_csv(fpath, header, data):
+    """(Over)Writes to CSV at `fpath` with `header` and `data`. Does not do any validation!"""
+
+    def _escape(field):
+        field = str(field)
+        if '"' in field:
+            field = field.replace('"', '""')
+        if "," in field or '"' in field or "\n" in field:
+            field = f'"{field}"'
+        return field
+
+    with open(fpath, "w") as f:
+        f.write(",".join(_escape(col) for col in header) + "\n")
+
+        for row in data:
+            f.write(",".join(_escape(cell) for cell in row) + "\n")
+
+
 def validate_csv_data(header, data):
     """Given header and data, validates CSV data, and raises exceptions if any errors found."""
-    
+
     if not header:
         raise Exception(f"Empty csv file/header")
 
     for row in data:
         if len(row) != len(header):  # basic check
             raise Exception(f"Malformed row in CSV file: {row}")
-    
+
     return True
 
 
 def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
-    """Return CSV data (as `flask.Response` via `jsonify`),
+    """Return CSV data (as dict),
     or, path (`str`) to filtered csv (if `for_download=True`) for given `log_id` with sort and filter opts.
 
     - Assumes the caller is passing valid `csv_fpath`,
@@ -441,7 +464,7 @@ def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
     try:
         # parse csv
         header, data = parse_csv(csv_fpath)
-        
+
         # validate
         validate_csv_data(header, data)
 
@@ -453,85 +476,71 @@ def get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False):
 
     # if data is required
     if not for_download:
-        return jsonify({"header": header, "data": data, "filtered": bool(filter_opts)})
+        return {"header": header, "data": data, "filtered": bool(filter_opts)}
 
     # otherwise, save sorted data into the file and pass that
     try:
-        with open(csv_fpath, "w") as csvfile:
-            csv_writer = csv.writer(csvfile)
-            csv_writer.writerow(header)
-            csv_writer.writerows(data)
+        write_csv(csv_fpath, header, data)
     except Exception as e:
         raise Exception(f"Error writing sorted data to CSV {csv_fpath}: {e}")
 
     return csv_fpath
 
 
-def get_csv_metadata(csv_fpath):
-    """Return metadata for CSV as `flask.Response` object of the form:
+def get_csv_timestamps(csv_fpath):
+    try:
+        # get sorted data using `get_csv_data`
+        # NOTE: +1 sorts by timestamps ascending!
+        data = get_csv_data(
+            csv_fpath=csv_fpath, sort_opts=("+1",), filter_opts=None, for_download=False
+        )["data"]
+
+        start = data[0][1]
+        end = data[-1][1]
+
+        return start, end
+    except Exception as e:
+        raise Exception(f"Error in reading timestamps of {csv_fpath}: {e}")
+
+
+def get_csv_metadata(log_id):
+    """Return metadata for `log_id` as dict of the form:
     ```
     {
-        "log_id": "<log_id>",
-        "original_name": "<original_log_name_without_ext>" | "" (if not found),
-        "start_datetime": "<earliest_timestamp>",
-        "end_datetime": "<latest_timestamp>",
+        "original_name": "<original_log_name>",
+        "start_timestamp": "<earliest_timestamp>",
+        "end_timestamp": "<latest_timestamp>",
     }
     ```
 
-    Assumes caller has checked that `csv_fpath` exists.
+    May raise exception."""
 
-    Raises exception if `csv_fpath` has zero non-header lines."""
+    # read metadata file
 
     try:
-        # extract log_id from the file name
-        log_id = os.path.basename(csv_fpath).rsplit(".", 1)[0]
+        # check if non-empty
+        if not os.path.getsize(FILE_METADATA_FILEPATH) > 0:
+            raise Exception("file empty.")
 
-        # retrieve original log name from the corresponding .info file
-        original_name = ""
-        try:
-            with open(
-                os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.info"), "r"
-            ) as f:
-                original_name = f.read().strip().rsplit(".", 1)[0]
-        except FileNotFoundError:
-            pass
+        # read
+        with open(FILE_METADATA_FILEPATH, "r") as f:
+            md = json.load(f)
 
-        # read the CSV file to extract metadata
-        with open(csv_fpath, "r") as csvfile:
-            csv_reader = csv.reader(csvfile)
-            header = next(csv_reader, None)
-            if not header:
-                raise Exception(f"CSV file {csv_fpath} has no header.")
-
-            timestamps = []
-            for row in csv_reader:
-                if len(row) != len(header):  # basic row validation
-                    raise Exception(f"malformed row in CSV file: {row}")
-                timestamps.append(row[1])  # assuming timestamp is in the second column
-
-            if not timestamps:
-                raise Exception(f"CSV file {csv_fpath} has no data rows.")
-
-            # sort timestamps to find the earliest and latest
-            timestamps = sorted(
-                timestamps,
-                key=lambda x: pd.to_datetime(x, format="%a %b %d %H:%M:%S %Y"),
-            )
-            start_datetime = timestamps[0]
-            end_datetime = timestamps[-1]
+        # check if metadata exists
+        if log_id not in md:
+            raise Exception(f"metadata not found for log_id {log_id}")
 
         # return metadata as a JSON response
-        return jsonify(
-            {
-                "log_id": log_id,
-                "original_name": original_name,
-                "start_datetime": start_datetime,
-                "end_datetime": end_datetime,
-            }
-        )
+        return {
+            "original_name": md[log_id]["original_name"],
+            "start_timestamp": md[log_id]["start_timestamp"],
+            "end_timestamp": md[log_id]["end_timestamp"],
+        }
 
     except Exception as e:
-        raise Exception(f"Error extracting metadata from CSV {csv_fpath}: {e}")
+        raise Exception(
+            f"Could not read file metadata from {FILE_METADATA_FILEPATH}: {e}"
+        )
 
 
 def parse_csv_request(log_id, request):
@@ -633,9 +642,7 @@ def generate_plots(data_df, plot_opts, plot_files):
             # ! have to convert timestamps to datetime objects
             # `pd.to_datetime`: https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html
             # strptime format: https://docs.python.org/3/library/datetime.html#strftime-and-strptime-behavior
-            dt_series = pd.to_datetime(
-                data_df["Time"], format="%a %b %d %H:%M:%S %Y"
-            )
+            dt_series = pd.to_datetime(data_df["Time"], format="%a %b %d %H:%M:%S %Y")
 
             # generate full range of timestamps from start to end with step = 1s
             # https://pandas.pydata.org/docs/reference/api/pandas.date_range.html
@@ -644,8 +651,8 @@ def generate_plots(data_df, plot_opts, plot_files):
             )
 
             # count occurrences of each timestamp
-            timestamp_counts = (
-                dt_series.value_counts().reindex(full_range, fill_value=0)
+            timestamp_counts = dt_series.value_counts().reindex(
+                full_range, fill_value=0
             )
 
             # plot the line graph
@@ -696,7 +703,6 @@ def generate_plots(data_df, plot_opts, plot_files):
                 bbox_inches="tight",
             )
             plt.close(fig)
-
 
         if "level_distribution" in plot_opts:
             # square figure
@@ -812,22 +818,16 @@ def handle_upload():
         # generate unique ID
 
         # log_id = str(uuid.uuid4())
-        log_id = str(time() * 10 ** 6)[:15] + f"{(random.random()):0.5f}"[2:]
+        log_id = str(time() * 10**6)[:15] + f"{(random.random()):0.5f}"[2:]
 
         log_filename = f"{log_id}.log"
         csv_filename = f"{log_id}.csv"
-        info_filename = f"{log_id}.info"  # metadata file to store original name
 
         log_filepath = os.path.join(app.config["UPLOAD_FOLDER"], log_filename)
         csv_filepath = os.path.join(app.config["PROCESSED_FOLDER"], csv_filename)
-        info_filepath = os.path.join(app.config["PROCESSED_FOLDER"], info_filename)
 
         try:
             file.save(log_filepath)
-
-            # store info
-            with open(info_filepath, "w") as f:
-                f.write(original_filename)
 
             # run bash script with proper args
             print(f"Running script: {PARSE_SCRIPT_PATH} {log_filepath} {csv_filepath}")
@@ -841,6 +841,42 @@ def handle_upload():
             if result.returncode == 0:
                 print(f"SUCCESS stdout:\n{result.stdout}")
                 print(f"SUCCESS stderr:\n{result.stderr}")
+
+                # if validation and processing completed, add metadata entry
+
+                # check if file non-empty
+                if os.path.getsize(FILE_METADATA_FILEPATH) > 0:
+                    try:
+                        with open(FILE_METADATA_FILEPATH, "r") as f:
+                            old_md = json.load(f)
+                    except Exception as e:
+                        raise Exception(
+                            f"Could not read (metadata file) {FILE_METADATA_FILEPATH}: {e}"
+                        )
+                else:
+                    old_md = {}
+
+                # add entry for newly processed file
+                start, end = get_csv_timestamps(csv_filepath)
+
+                new_md_entry = {
+                    log_id: {
+                        "original_name": original_filename,
+                        "start_timestamp": start,
+                        "end_timestamp": end,
+                    }
+                }
+
+                old_md.update(new_md_entry)
+
+                try:
+                    with open(FILE_METADATA_FILEPATH, "w") as f:
+                        json.dump(old_md, f)
+                except Exception as e:
+                    raise Exception(
+                        f"Could not write file metadata to {FILE_METADATA_FILEPATH}: {e}"
+                    )
+
                 # return data in case of success
                 return jsonify(
                     {
@@ -857,8 +893,6 @@ def handle_upload():
                 # cleanup if validation failed
                 if os.path.exists(csv_filepath):
                     os.remove(csv_filepath)
-                if os.path.exists(info_filepath):
-                    os.remove(info_filepath)
 
                 # keep log file for debugging currently
 
@@ -893,10 +927,9 @@ def handle_upload():
                 os.remove(log_filepath)
             if os.path.exists(csv_filepath):
                 os.remove(csv_filepath)
-            if os.path.exists(info_filepath):
-                os.remove(info_filepath)
 
             return jsonify({"success": False, "message": f"Server error: {e}"}), 500
+
     # if file type was invalid
     else:
         return (
@@ -928,7 +961,9 @@ def get_csv(log_id):
 
     # get csv data as response
     try:
-        response = get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False)
+        response = jsonify(
+            get_csv_data(csv_fpath, sort_opts, filter_opts, for_download=False)
+        )
     except Exception as e:
         # error is server error
         return jsonify({"error": f"{e}"}), 500
@@ -937,7 +972,7 @@ def get_csv(log_id):
 
 
 @app.route("/get_metadata/<log_id>")
-def get_metadata(log_id):
+def serve_metadata(log_id):
     """Endpoint for serving metadata for given log id."""
     log_fpath = os.path.join(app.config["UPLOAD_FOLDER"], f"{log_id}.log")
     csv_fpath = os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.csv")
@@ -950,7 +985,7 @@ def get_metadata(log_id):
 
     # get metadata as response
     try:
-        response = get_csv_metadata(csv_fpath)
+        response = jsonify(get_csv_metadata(log_id))
     except Exception as e:
         # error is server error
         return jsonify({"error": f"{e}"}), 500
@@ -965,12 +1000,13 @@ def download_csv(log_id):
     # retrieve original filename for download suggestion
     original_name = "download"  # default
     try:
-        with open(
-            os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.info"), "r"
-        ) as f:
-            original_name = f.read().strip().rsplit(".", 1)[0]  # use log name part
-    except FileNotFoundError:
+        md = get_csv_metadata(log_id)
+        original_name = md["original_name"] if md["original_name"] else original_name
+    except Exception as e:
+        print(e)
         pass
+
+    original_name = original_name.rsplit(".", 1)[0]  # remove ext
 
     download_filename = f"{original_name}.csv"
 
@@ -1044,9 +1080,7 @@ def handle_generate():
         return jsonify({"error": f"{e}"}), 404
 
     try:
-        response = get_csv_data(csv_fpath, None, filter_opts, for_download=False)
-        # since `get_csv_data` returns `flask.Response` we first convert `pd.DataFrame`
-        data = response.get_json()
+        data = get_csv_data(csv_fpath, None, filter_opts, for_download=False)
         data_df = pd.DataFrame(data=data["data"], columns=data["header"])
 
     except Exception as e:
@@ -1097,12 +1131,12 @@ def download_plot(plot):
     # retrieve original filename for download suggestion
     original_name = "download"  # default
     try:
-        with open(
-            os.path.join(app.config["PROCESSED_FOLDER"], f"{log_id}.info"), "r"
-        ) as f:
-            original_name = f.read().strip().rsplit(".", 1)[0]  # use log name part
-    except FileNotFoundError:
+        md = get_csv_metadata(log_id)
+        original_name = md["original_name"] if md["original_name"] else original_name
+    except Exception:
         pass
+
+    original_name = original_name.rsplit(".", 1)[0]  # remove ext
 
     download_filename = f"{original_name}_{plot_type_w_ext}"
 

@@ -10,6 +10,9 @@ import {
 	resetFilterOpts,
 	setFilterRange,
 	getDatetimeBoundsFromData,
+	updateFilterValues,
+	getMetadataRequestURL,
+	fmtTimestamp,
 	resetFilterValues,
 } from "./utils.js";
 
@@ -26,10 +29,19 @@ const sortResetBtn = document.getElementById('sort-reset-btn');
 const filterApplyBtn = document.getElementById('filter-apply-btn');
 const filterResetBtn = document.getElementById('filter-reset-btn');
 
+let oldSelectedId = selectEl.value;
+
 // ================= add event listeners ============================
 
 document.addEventListener('DOMContentLoaded', updateTable);
-selectEl.addEventListener('click', updateTable);
+selectEl.addEventListener('click', () => {
+	updateTable();
+	if (selectEl.value && selectEl.value !== oldSelectedId) {
+		oldSelectedId = selectEl.value;
+		resetFilterValues();
+		updateFilterOptsValues();
+	}
+});
 filterApplyBtn.addEventListener('click', filterBtnCallback);
 
 sortResetBtn.addEventListener('click', () => {
@@ -38,8 +50,9 @@ sortResetBtn.addEventListener('click', () => {
 });
 
 filterResetBtn.addEventListener('click', () => {
-	resetFilterOpts();
 	updateTable(selectEl);
+	updateFilterOptsValues();
+	updateFilterValues(true);
 });
 
 // =================== eventlistener callback funcs =================
@@ -164,13 +177,6 @@ function updateTable() {
 			downloadLink.download = `${selectedLogId}.csv`;  // default suggestion for filename
 			// will be overriden by response from flask app?
 
-			// if data is unfiltered, use it to set min and max for date time
-			if (!result.filtered) {
-				const { start, end } = getDatetimeBoundsFromData(result.data);
-				setFilterRange(start, end);
-				setFilterOpts(start, end);
-				resetFilterValues();
-			}
 
 		})
 		.catch(error => {
@@ -178,5 +184,43 @@ function updateTable() {
 			errorMessage.textContent = `Error fetching CSV data: ${error}`;
 			errorMessage.style.display = 'block';
 			console.error('Error fetching CSV:', error);
+		});
+}
+
+function updateFilterOptsValues() {
+	// make call to fetch metadata for updating filtering options
+	fetch(getMetadataRequestURL(selectEl.value))
+		.then(response => {
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+			return response.json();
+		})
+		.then(result => {
+			// error handling
+			if (result.error) {
+				errorMessage.textContent = `Error loading metadata: ${result.error}`;
+				errorMessage.style.display = 'block';
+				return;
+			}
+
+			// extract formatted timestamps
+			const start = fmtTimestamp(result.start_timestamp);
+			const end = fmtTimestamp(result.end_timestamp);
+
+			console.log(`setting range ${start} ${end}`)
+
+			// set limits
+			setFilterRange(start, end);
+
+			// and defaults
+			setFilterOpts(start, end);
+			updateFilterValues();
+		})
+		.catch(error => {
+			loadingMessage.style.display = 'none';
+			errorMessage.textContent = `Error generating plots / fetching status: ${error}`;
+			errorMessage.style.display = 'block';
+			console.error('Error generating plots / fetching status:', error);
 		});
 }

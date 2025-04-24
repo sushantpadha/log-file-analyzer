@@ -18,7 +18,7 @@ let endDatetimeOpt = ""
 let minDatetimeOpt = startDatetimeOpt;
 let maxDatetimeOpt = endDatetimeOpt;
 
-function getCSVRequestURL(logId, forDownload=false) {
+function getCSVRequestURL(logId, forDownload = false) {
 	const endpoint = (forDownload ? '/download_csv/' : '/get_csv/')
 
 	return endpoint + `${logId}?sort=${sortOpts}&filter=${startDatetimeOpt},${endDatetimeOpt}`;
@@ -42,7 +42,7 @@ function getPlotRequest(logId, plotOpts) {
 			filter_options: `${startDatetimeOpt},${endDatetimeOpt}`
 		})
 	};
-	return {endpoint, payload};
+	return { endpoint, payload };
 }
 
 function getPlotStatusRequestURL() {
@@ -162,18 +162,27 @@ function setFilterRange(start, end) {
 	endTimeEl.max = end.split(' ')[1];
 }
 
-function resetFilterValues() {
-	// set defaults
-	startDateEl.value = startDatetimeOpt.split(' ')[0];
-	startTimeEl.value = startDatetimeOpt.split(' ')[1];
+function updateFilterValues(force = false) {
+	console.log(`resetting filter values [${force}] ${startDatetimeOpt} ${endDatetimeOpt}`);
+	// set values to defaults
+	startDateEl.value = (force || !startDateEl.value) ? startDatetimeOpt.split(' ')[0] : startDateEl.value;
+	startTimeEl.value = (force || !startTimeEl.value) ? startDatetimeOpt.split(' ')[1] : startTimeEl.value;
 
-	endDateEl.value = endDatetimeOpt.split(' ')[0];
-	endTimeEl.value = endDatetimeOpt.split(' ')[1];
+	endDateEl.value = (force || !endDateEl.value) ? endDatetimeOpt.split(' ')[0] : endDateEl.value;
+	endTimeEl.value = (force || !endTimeEl.value) ? endDatetimeOpt.split(' ')[1] : endTimeEl.value;
 }
 
 function resetFilterOpts() {
 	startDatetimeOpt = "";
 	endDatetimeOpt = "";
+}
+
+function resetFilterValues() {
+	startDateEl.value = "";
+	startTimeEl.value = "";
+
+	endDateEl.value = "";
+	endTimeEl.value = "";
 }
 
 export {
@@ -192,6 +201,7 @@ export {
 	resetFilterOpts,
 	fmtTimestamp,
 	setFilterRange,
+	updateFilterValues,
 	resetFilterValues,
 	getDatetimeBoundsFromData,
 };

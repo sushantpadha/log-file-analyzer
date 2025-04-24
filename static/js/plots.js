@@ -9,6 +9,7 @@ import {
 	getMetadataRequestURL,
 	setFilterRange,
 	fmtTimestamp,
+	updateFilterValues,
 	resetFilterValues,
 } from "./utils.js";
 
@@ -24,18 +25,28 @@ const genPlotsBtn = document.getElementById('generate-plots-btn');
 // returns NodeList of all plot options elements
 const plotTypeCheckboxes = document.querySelectorAll('input[name="plot_type"]');
 
-
 const filterApplyBtn = document.getElementById('filter-apply-btn');
 const filterResetBtn = document.getElementById('filter-reset-btn');
 
+let oldSelectedId = selectEl.value;
+
+// ================= add event listeners ============================
+
 document.addEventListener('DOMContentLoaded', updateOptionsDiv);
-selectEl.addEventListener('change', updateOptionsDiv);
+selectEl.addEventListener('click', () => {
+	updateOptionsDiv();
+	if (selectEl.value && selectEl.value !== oldSelectedId) {
+		oldSelectedId = selectEl.value;
+		resetFilterValues();
+		updateFilterOptsValues();
+	}
+});
 
 filterApplyBtn.addEventListener('click', filterBtnCallback);
 
 filterResetBtn.addEventListener('click', () => {
-	resetFilterOpts();
-	_resetFilterOpts();
+	updateFilterOptsValues();
+	updateFilterValues(true);
 });
 
 genPlotsBtn.addEventListener('click', generatePlots);
@@ -67,7 +78,7 @@ function updateOptionsDiv() {
 		return;
 	}
 
-	_resetFilterOpts();
+	updateFilterOptsValues();
 }
 
 // send request for plot generation, query status and populate plots div with response
@@ -203,10 +214,9 @@ function generatePlots() {
 		});
 }
 
-function _resetFilterOpts() {
-	const selectedLogId = selectEl.value;
-
-	fetch(getMetadataRequestURL(selectedLogId))
+function updateFilterOptsValues() {
+	// make call to fetch metadata for updating filtering options
+	fetch(getMetadataRequestURL(selectEl.value))
 		.then(response => {
 			if (!response.ok) {
 				throw new Error(`HTTP error! status: ${response.status}`);
@@ -216,14 +226,14 @@ function _resetFilterOpts() {
 		.then(result => {
 			// error handling
 			if (result.error) {
-				errorMessage.textContent = `Error loading data: ${result.error}`;
+				errorMessage.textContent = `Error loading metadata: ${result.error}`;
 				errorMessage.style.display = 'block';
 				return;
 			}
 
 			// extract formatted timestamps
-			const start = fmtTimestamp(result.start_datetime);
-			const end = fmtTimestamp(result.end_datetime);
+			const start = fmtTimestamp(result.start_timestamp);
+			const end = fmtTimestamp(result.end_timestamp);
 
 			console.log(`setting range ${start} ${end}`)
 
@@ -232,7 +242,7 @@ function _resetFilterOpts() {
 
 			// and defaults
 			setFilterOpts(start, end);
-			resetFilterValues();
+			updateFilterValues();
 		})
 		.catch(error => {
 			loadingMessage.style.display = 'none';
