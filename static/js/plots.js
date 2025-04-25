@@ -2,7 +2,6 @@ import {
 	parseDatetimeInputs,
 	validateFilterDates,
 	setFilterOpts,
-	resetFilterOpts,
 	getPlotRequest,
 	getPlotStatusRequestURL,
 	getPlotURL,
@@ -16,23 +15,38 @@ import {
 const selectEl = document.getElementById('log-select-plot');
 const optionsDiv = document.getElementById('plot-options');
 
-const plotDisplayContainer = document.getElementById('plot-display-container'); // parent el
+const plotDisplayContainer = document.getElementById('plot-display-container');
 const loadingMessage = document.getElementById('plot-loading-message');
 const errorMessage = document.getElementById('plot-error-message');
-const plotDisplayArea = document.getElementById('plot-display-area'); // only plots displayed here
+const plotDisplayArea = document.getElementById('plot-display-area');
 
 const genPlotsBtn = document.getElementById('generate-plots-btn');
-// returns NodeList of all plot options elements
 const plotTypeCheckboxes = document.querySelectorAll('input[name="plot_type"]');
+
+const customCheckbox = document.getElementById('plot-custom');
+const codeEditorFieldset = document.getElementById('code-editor-controls');
 
 const filterApplyBtn = document.getElementById('filter-apply-btn');
 const filterResetBtn = document.getElementById('filter-reset-btn');
 
 let oldSelectedId = selectEl.value;
 
-// ================= add event listeners ============================
+// ====================== event listeners =======================
 
-document.addEventListener('DOMContentLoaded', updateOptionsDiv);
+document.addEventListener('DOMContentLoaded', () => {
+	updateOptionsDiv();
+	toggleEditor();
+
+	window.codeEditor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
+		mode: "python",
+		theme: "default",
+		lineNumbers: true,
+		indentUnit: 4,
+		tabSize: 4,
+		lineWrapping: true
+	});
+});
+
 selectEl.addEventListener('click', () => {
 	updateOptionsDiv();
 	if (selectEl.value && selectEl.value !== oldSelectedId) {
@@ -41,6 +55,8 @@ selectEl.addEventListener('click', () => {
 		updateFilterOptsValues();
 	}
 });
+
+customCheckbox.addEventListener('change', toggleEditor);
 
 filterApplyBtn.addEventListener('click', filterBtnCallback);
 
@@ -51,29 +67,31 @@ filterResetBtn.addEventListener('click', () => {
 
 genPlotsBtn.addEventListener('click', generatePlots);
 
-// =================== eventlistener callback funcs =================
+// ====================== callbacks functions =======================
 
-// parse filter data, update date global vars and call `updateTable`
+function toggleEditor() {
+	codeEditorFieldset.style.display = customCheckbox.checked ? 'flex' : 'none';
+	// ! force refreshing because codemirror doesn't update the layout
+	if (window.codeEditor) {
+		window.codeEditor.refresh();
+	}
+}
+
 function filterBtnCallback() {
-	// parse
-	const { startDatetime, endDatetime } = parseDatetimeInputs()
+	const { startDatetime, endDatetime } = parseDatetimeInputs();
 
-	// validate
 	if (!validateFilterDates(startDatetime, endDatetime)) {
 		return;
 	}
 
-	// set global vars
 	setFilterOpts(startDatetime, endDatetime);
 }
 
-// toggle displaying of options div, reset value and set limits for filter inputs
 function updateOptionsDiv() {
 	const selectedLogId = selectEl.value;
 	if (selectedLogId) {
 		optionsDiv.style.display = 'flex';
-	}
-	else {
+	} else {
 		optionsDiv.style.display = 'none';
 		return;
 	}
@@ -81,173 +99,165 @@ function updateOptionsDiv() {
 	updateFilterOptsValues();
 }
 
-// send request for plot generation, query status and populate plots div with response
-function generatePlots() {
-	// parse plot options
+// ====================== plot handling =======================
 
-	// filter checked > extract values (as array)
+function generatePlots() {
+	// obtain user selected plot types
 	const plotOpts = Array.from(plotTypeCheckboxes)
 		.filter(node => node.checked)
-		.map(node => node.value)
-
-	// TODO: inc filtering opts
+		.map(node => node.value);
 
 	const selectedLogId = selectEl.value;
+	if (!selectedLogId) return;
 
-	// clear previous content
+	// check for custom code option
+	const customCode = (plotOpts.includes("custom") && window.codeEditor)
+		? window.codeEditor.getValue()
+		: null;
+
+	// generate the plot request and reset display containers
+	const { endpoint, payload } = getPlotRequest(selectedLogId, plotOpts, customCode);
 	plotDisplayArea.innerHTML = '';
 	plotDisplayArea.style.display = 'none';
 	loadingMessage.style.display = 'none';
 	errorMessage.style.display = 'none';
 
-	// if invalid log id is passed
-	if (!selectedLogId) {
-		return;
-	}
-
-	const { endpoint, payload } = getPlotRequest(selectedLogId, plotOpts);
-
-	console.log(`Sending @ ${endpoint} payload: ${payload.body}`)
-
-	// make request to generate plots
-	fetch(endpoint, payload)
-		.then(response => {
-			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}`);
-			}
-			return response.json();
-		})
-		.then(result => {
-			// error handling
-			if (result.error) {
-				errorMessage.textContent = `Error loading data: ${result.error}`;
-				errorMessage.style.display = 'block';
-				return;
-			}
-
-			// display loading message
-			loadingMessage.style.display = 'block';
-
-			// receive response for status file which will be queried for job status and plot filenames
-			// const statusPath = result.status_file;
-
-			// set max attempts as 60 (60 * 500ms = 30s)
-			let attempts = 0;
-			const maxAttempts = 60;
-
-			// query every 500 ms
-			const interval = setInterval(() => {
-				attempts++;
-
-				// request for url
-				fetch(getPlotStatusRequestURL())
-					.then(response => {
-						if (!response.ok) {
-							throw new Error(`Error requesting job status file! status: ${response.status}`);
-						}
-						return response.json();
-					})
-					.then(result => {
-						// error handling
-						if (result.error) {
-							errorMessage.textContent = `Error in plot generation / status file I/O: ${result.error}`;
-							errorMessage.style.display = 'block';
-							return;
-						}
-
-						// if done processing
-						if (result.status == 'done') {
-							// stop looping
-							clearInterval(interval);
-
-							// remove loading msg
-							loadingMessage.style.display = 'none';
-
-							// populate plots div
-							Object.entries(result.plot_files).forEach(([type, file]) => {
-
-								const plotDiv = document.createElement('div');
-								plotDiv.classList.add('plot-container');
-
-								const plotImg = document.createElement('img');
-								plotImg.classList.add('plot-image');
-								// simply set src to point to plot file path
-								plotImg.src = getPlotURL(file);
-
-								const plotDLLink = document.createElement('a');
-								plotDLLink.classList.add('plot-dl-link');
-								plotDLLink.textContent = "Download Plot";
-
-								plotDLLink.href = getPlotURL(file, true);
-								plotDLLink.download = file
-
-								plotDiv.appendChild(plotImg);
-								plotDiv.appendChild(plotDLLink);
-
-								plotDisplayArea.appendChild(plotDiv);
-							});
-
-							// hide loading area
-							loadingMessage.style.display = 'none';
-
-							// show plots
-							plotDisplayArea.style.display = 'flex';
-
-						}
-					})
-
-				if (attempts >= maxAttempts) {
-					clearInterval(interval);
-					// ! raise error after timeout
-					loadingMessage.style.display = 'none';
-					errorMessage.textContent = `Error requesting job status file! Request timed out.`;
-					errorMessage.style.display = 'block';
-					console.error(`Error requesting job status file! Request timed out.`);
-				}
-			}, 500)
-		})
-		.catch(error => {
-			loadingMessage.style.display = 'none';
-			errorMessage.textContent = `Error generating plots / fetching status: ${error}`;
-			errorMessage.style.display = 'block';
-			console.error('Error generating plots / fetching status:', error);
-		});
+	// send plot request
+	sendPlotRequest(endpoint, payload);
 }
 
-function updateFilterOptsValues() {
-	// make call to fetch metadata for updating filtering options
-	fetch(getMetadataRequestURL(selectEl.value))
-		.then(response => {
-			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}`);
-			}
-			return response.json();
-		})
-		.then(result => {
-			// error handling
-			if (result.error) {
-				errorMessage.textContent = `Error loading metadata: ${result.error}`;
-				errorMessage.style.display = 'block';
+async function sendPlotRequest(endpoint, payload) {
+	try {
+		// send the request to the server
+		const response = await fetch(endpoint, payload);
+		if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+		const result = await response.json();
+		if (result.error) return showError(`Error loading data: ${result.error}`);
+
+		// poll status
+		loadingMessage.style.display = 'block';
+		pollPlotStatus();
+	} catch (err) {
+		showError(`Error generating plots: ${err.message}`);
+	}
+}
+
+function pollPlotStatus() {
+	let attempts = 0;
+	// total = 60 * 500ms = 30s
+	const maxAttempts = 60;
+
+	const interval = setInterval(async () => {
+		attempts++;
+		// timeout
+		if (attempts >= maxAttempts) {
+			clearInterval(interval);
+			showError("Error requesting job status file! Request timed out.");
+			return;
+		}
+
+		try {
+			// fetch status
+			const response = await fetch(getPlotStatusRequestURL());
+			if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+			const result = await response.json();
+
+			if (result.status == 'error') {
+				// NOTE: in this case, we terminate on error
+				clearInterval(interval);
+				showError(`Error in plot generation / status file I/O: ${result.error}`);
 				return;
 			}
 
-			// extract formatted timestamps
-			const start = fmtTimestamp(result.start_timestamp);
-			const end = fmtTimestamp(result.end_timestamp);
+			if (result.error) {
+				// NOTE: in this case, we do not terminate on error
+				showError(`Error in plot generation / status file I/O: ${result.error}`);
+			}
 
-			console.log(`setting range ${start} ${end}`)
+			// if done, render plots
+			if (result.status === 'done') {
+				clearInterval(interval);
+				renderPlots(result.plot_files);
+			}
+		} catch (err) {
+			clearInterval(interval);
+			showError(`Error fetching plot status: ${err.message}`);
+		}
+	}, 500);
+}
 
-			// set limits
-			setFilterRange(start, end);
+function renderPlots(plotFiles) {
+	// reset display containers
+	loadingMessage.style.display = 'none';
+	plotDisplayArea.innerHTML = '';
 
-			// and defaults
-			setFilterOpts(start, end);
-			updateFilterValues();
-		})
-		.catch(error => {
-			loadingMessage.style.display = 'none';
-			errorMessage.textContent = `Error generating plots / fetching status: ${error}`;
-			errorMessage.style.display = 'block';
-			console.error('Error generating plots / fetching status:', error);
-		});
+	const prettyTitles = {
+		'events_over_time': 'Events logged with time (Line)',
+		'level_distribution': 'Level State Distribution (Pie)',
+		'event_code_distribution': 'Event Code Distribution (Bar)',
+		'custom': 'Custom Plot',
+	}
+
+	Object.entries(plotFiles).forEach(([type, file]) => {
+		// generate plot div
+		const plotDiv = document.createElement('div');
+		plotDiv.classList.add('plot-container');
+
+		// plot title
+		const plotTitle = document.createElement('h3');
+		plotTitle.classList.add('plot-title');
+		plotTitle.textContent = prettyTitles[type] || type;
+
+		// plot image
+		const plotImg = document.createElement('img');
+		plotImg.classList.add('plot-image');
+		plotImg.src = getPlotURL(file);
+
+		// plot download link
+		const plotDLLink = document.createElement('a');
+		plotDLLink.classList.add('plot-dl-link');
+		plotDLLink.textContent = "Download Plot";
+		plotDLLink.href = getPlotURL(file, true);
+		plotDLLink.download = file;
+
+		plotDiv.appendChild(plotTitle);
+		plotDiv.appendChild(plotImg);
+		plotDiv.appendChild(plotDLLink);
+		plotDisplayArea.appendChild(plotDiv);
+	});
+
+	plotDisplayArea.style.display = 'flex';
+}
+
+// ===================== helper ========================
+
+async function updateFilterOptsValues() {
+	try {
+		const response = await fetch(getMetadataRequestURL(selectEl.value));
+		if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+		const result = await response.json();
+		if (result.error) {
+			showError(`Error loading metadata: ${result.error}`);
+			return;
+		}
+
+		const start = fmtTimestamp(result.start_timestamp);
+		const end = fmtTimestamp(result.end_timestamp);
+
+		console.log(`setting range ${start} ${end}`);
+
+		setFilterRange(start, end);
+		setFilterOpts(start, end);
+		updateFilterValues();
+	} catch (error) {
+		showError(`Error loading metadata: ${error.message}`);
+	}
+}
+
+function showError(message) {
+	loadingMessage.style.display = 'none';
+	errorMessage.textContent = message;
+	errorMessage.style.display = 'block';
+	console.error(message);
 }

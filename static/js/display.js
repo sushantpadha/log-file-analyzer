@@ -3,7 +3,6 @@ import {
 	parseDatetimeInputs,
 	validateFilterDates,
 	setFilterOpts,
-	// getFilterOpts,
 	setSortOpts,
 	getSortOpts,
 	resetSortOpts,
@@ -16,7 +15,6 @@ import {
 	resetFilterValues,
 } from "./utils.js";
 
-// define elements
 const selectEl = document.getElementById('log-select');
 const displayArea = document.getElementById('log-display-area');
 const logTable = document.getElementById('log-table');
@@ -31,9 +29,12 @@ const filterResetBtn = document.getElementById('filter-reset-btn');
 
 let oldSelectedId = selectEl.value;
 
-// ================= add event listeners ============================
+// ====================== event listeners =======================
 
-document.addEventListener('DOMContentLoaded', updateTable);
+document.addEventListener('DOMContentLoaded', () => {
+	updateTable();
+});
+
 selectEl.addEventListener('click', () => {
 	updateTable();
 	if (selectEl.value && selectEl.value !== oldSelectedId) {
@@ -42,185 +43,144 @@ selectEl.addEventListener('click', () => {
 		updateFilterOptsValues();
 	}
 });
+
 filterApplyBtn.addEventListener('click', filterBtnCallback);
 
 sortResetBtn.addEventListener('click', () => {
 	resetSortOpts();
-	updateTable(selectEl);
+	updateTable();
 });
 
 filterResetBtn.addEventListener('click', () => {
-	updateTable(selectEl);
+	updateTable();
 	updateFilterOptsValues();
 	updateFilterValues(true);
 });
 
-// =================== eventlistener callback funcs =================
+// ====================== callback functions =======================
 
-// parse filter data, update date global vars and call `updateTable`
 function filterBtnCallback() {
-	// parse
-	const { startDatetime, endDatetime } = parseDatetimeInputs()
+	const { startDatetime, endDatetime } = parseDatetimeInputs();
 
-	// validate
 	if (!validateFilterDates(startDatetime, endDatetime)) {
 		return;
 	}
 
-	// set global vars
 	setFilterOpts(startDatetime, endDatetime);
-
-	// update table
-	updateTable(selectEl);
+	updateTable();
 }
 
-// update the `sortOpts` global var and call `updateTable`
 function sortBtnCallback(type, field) {
-	// type = +/-
-	// field is int from 0 - 4 (inc.)
 	const opt = `${type}${field}`;
-
 	setSortOpts(opt);
-
-	// finally, update table
-	updateTable(selectEl);
+	updateTable();
 }
 
-// send HTTPRequest via `fetch` and update table
-function updateTable() {
-	const selectedLogId = selectEl.value;
-	// console.log(getRequestURL(selectedLogId));
+// ====================== table handling =======================
 
-	// clear table content and remove controls and error messages
+async function updateTable() {
+	const selectedLogId = selectEl.value;
+
 	logTable.querySelector('thead').innerHTML = '';
 	logTable.querySelector('tbody').innerHTML = '';
 	errorMessage.style.display = 'none';
 	controlsDiv.style.display = 'none';
 
-	// parse sort opts to highlight buttons
 	const parsedSortOpts = getSortOpts();
-	// console.log(parsedSortOpts);
 
-	if (!selectedLogId) {
-		return
-	}
+	if (!selectedLogId) return;
+
 	loadingMessage.style.display = 'block';
 
-	// fetch csv data from backend
 	const reqURL = getCSVRequestURL(selectedLogId, false);
+	console.log(`Making HTTP request: ${reqURL}`);
 
-	console.log(`Making HTTP request: ${reqURL}`)
+	try {
+		const response = await fetch(reqURL);
+		if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+		const result = await response.json();
 
-	fetch(reqURL)
-		.then(response => {
-			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}`);
-			}
-			return response.json();
-		})
-		.then(result => {
-			// error handling
-			loadingMessage.style.display = 'none';
-			if (result.error) {
-				errorMessage.textContent = `Error loading data: ${result.error}`;
-				errorMessage.style.display = 'block';
-				return;
-			}
+		if (result.error) return showError(`Error loading data: ${result.error}`);
 
-			// populate table header
-			const thead = logTable.querySelector('thead');
-			const headerRow = document.createElement('tr');
+		// populate header
+		const thead = logTable.querySelector('thead');
+		const headerRow = document.createElement('tr');
 
-			result.header.forEach((colName, colIdx) => {
-				const th = document.createElement('th');
-				th.textContent = colName;
+		result.header.forEach((colName, colIdx) => {
+			// th element
+			const th = document.createElement('th');
+			th.textContent = colName;
 
-				// ▲▼ add buttons with appropriate classes and attach event listeners
+			// add sort buttons
+			const btn1 = document.createElement('button');
+			btn1.textContent = '▲';
+			btn1.classList.add('btn-sort', 'asc');
+			if (parsedSortOpts.includes(`+${colIdx}`)) btn1.classList.add('active');
+			btn1.addEventListener('click', (ev) => sortBtnCallback('+', colIdx, ev.currentTarget));
+			th.appendChild(btn1);
 
-				const btn1 = document.createElement('button');
-				btn1.textContent = '▲';
-				btn1.classList.add('btn-sort');
-				btn1.classList.add('asc');
-				if (parsedSortOpts.includes(`+${colIdx}`))  // set btn to be active if in `parsedSortOpts`
-					btn1.classList.add('active');
-				btn1.addEventListener('click', (ev) => sortBtnCallback('+', colIdx, ev.currentTarget));
-				th.appendChild(btn1)
+			const btn2 = document.createElement('button');
+			btn2.textContent = '▼';
+			btn2.classList.add('btn-sort', 'desc');
+			if (parsedSortOpts.includes(`-${colIdx}`)) btn2.classList.add('active');
+			btn2.addEventListener('click', (ev) => sortBtnCallback('-', colIdx, ev.currentTarget));
+			th.appendChild(btn2);
 
-				const btn2 = document.createElement('button');
-				btn2.textContent = '▼';
-				btn2.classList.add('btn-sort');
-				btn2.classList.add('desc');
-				if (parsedSortOpts.includes(`-${colIdx}`))  // set btn to be active if in `parsedSortOpts`
-					btn2.classList.add('active');
-				btn2.addEventListener('click', (ev) => sortBtnCallback('-', colIdx, ev.currentTarget));
-				th.appendChild(btn2)
-
-				headerRow.appendChild(th);
-			});
-			thead.appendChild(headerRow);
-
-			// populate table body
-			const tbody = logTable.querySelector('tbody');
-			result.data.forEach(rowData => {
-				const tr = document.createElement('tr');
-				rowData.forEach(cellData => {
-					const td = document.createElement('td');
-					td.textContent = cellData;
-					tr.appendChild(td);
-				});
-				tbody.appendChild(tr);
-			});
-
-			// set controls and download link
-			controlsDiv.style.display = 'block';
-			downloadLink.href = getCSVRequestURL(selectedLogId, true);
-			downloadLink.download = `${selectedLogId}.csv`;  // default suggestion for filename
-			// will be overriden by response from flask app?
-
-
-		})
-		.catch(error => {
-			loadingMessage.style.display = 'none';
-			errorMessage.textContent = `Error fetching CSV data: ${error}`;
-			errorMessage.style.display = 'block';
-			console.error('Error fetching CSV:', error);
+			headerRow.appendChild(th);
 		});
+		thead.appendChild(headerRow);
+
+		// populate body
+		const tbody = logTable.querySelector('tbody');
+		result.data.forEach(rowData => {
+			const tr = document.createElement('tr');
+			rowData.forEach(cellData => {
+				const td = document.createElement('td');
+				td.textContent = cellData;
+				tr.appendChild(td);
+			});
+			tbody.appendChild(tr);
+		});
+
+		// display controls
+		controlsDiv.style.display = 'block';
+		downloadLink.href = getCSVRequestURL(selectedLogId, true);
+		downloadLink.download = `${selectedLogId}.csv`;
+	}
+	catch (err) {
+		showError(`Error fetching CSV data: ${err.message}`);
+	}
+	loadingMessage.style.display = 'none';
 }
 
-function updateFilterOptsValues() {
-	// make call to fetch metadata for updating filtering options
-	fetch(getMetadataRequestURL(selectEl.value))
-		.then(response => {
-			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}`);
-			}
-			return response.json();
-		})
-		.then(result => {
-			// error handling
-			if (result.error) {
-				errorMessage.textContent = `Error loading metadata: ${result.error}`;
-				errorMessage.style.display = 'block';
-				return;
-			}
+// ===================== helper ========================
 
-			// extract formatted timestamps
-			const start = fmtTimestamp(result.start_timestamp);
-			const end = fmtTimestamp(result.end_timestamp);
+async function updateFilterOptsValues() {
+	try {
+		const response = await fetch(getMetadataRequestURL(selectEl.value));
+		if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+		const result = await response.json();
 
-			console.log(`setting range ${start} ${end}`)
+		if (result.error) return showError(`Error loading metadata: ${result.error}`);
 
-			// set limits
-			setFilterRange(start, end);
+		const start = fmtTimestamp(result.start_timestamp);
+		const end = fmtTimestamp(result.end_timestamp);
 
-			// and defaults
-			setFilterOpts(start, end);
-			updateFilterValues();
-		})
-		.catch(error => {
-			loadingMessage.style.display = 'none';
-			errorMessage.textContent = `Error generating plots / fetching status: ${error}`;
-			errorMessage.style.display = 'block';
-			console.error('Error generating plots / fetching status:', error);
-		});
+		console.log(`setting range ${start} ${end}`);
+
+		setFilterRange(start, end);
+		setFilterOpts(start, end);
+		updateFilterValues();
+		console.log(`Filter options updated: ${start} - ${end}`);
+	}
+	catch (err) {
+		showError(`Error generating plots / fetching status: ${err.message}`);
+	}
+}
+
+function showError(message) {
+	loadingMessage.style.display = 'none';
+	errorMessage.textContent = message;
+	errorMessage.style.display = 'block';
+	console.error(message);
 }

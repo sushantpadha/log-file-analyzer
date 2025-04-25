@@ -11,30 +11,37 @@
         margin-top: 1em;
         /* https://developer.mozilla.org/en-US/docs/Web/CSS/flex-wrap */
         flex-wrap: wrap;
+        flex-flow: wrap;
     }
 
-    #plot-controls,
-    #filter-controls {
-        /* https://developer.mozilla.org/en-US/docs/Web/CSS/flex */
-        flex: 1 1 300px;
+    #plot-options legend {
+        font-weight: bold;
+        margin-bottom: 0.5em;
+        color: rgb(67, 67, 67);
+    }
+
+    .options {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.5em;
+    }
+
+    #code-editor-controls {
+        flex: 5 0 500px;
         padding: 1em;
         border: 1px solid #ccc;
         border-radius: 8px;
         background-color: #f9f9f9;
     }
 
-    #plot-controls legend,
-    #filter-controls legend {
-        font-weight: bold;
-        margin-bottom: 0.5em;
-        color: rgb(67, 67, 67);
-    }
-
-    #plot-controls div,
-    #filter-controls div {
-        display: flex;
-        align-items: center;
-        margin-bottom: 0.5em;
+    .controls {
+        /* https://developer.mozilla.org/en-US/docs/Web/CSS/flex */
+        flex: 1 1 300px;
+        flex-direction: column;
+        padding: 1em;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        background-color: #f9f9f9;
     }
 
     #plot-loading-message,
@@ -80,7 +87,21 @@
         background-color: #bbbbbb8b;
         text-decoration: none;
     }
+
+    #code-editor-instructions {
+        font-size: 0.9em;
+        color: #333;
+        margin-bottom: 10px;
+        margin-top: -10px;
+    }
 </style>
+
+<!-- CodeMirror core styles and scripts -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+
+<!-- Python mode for syntax highlighting -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
 
 {% endblock %}
 
@@ -97,27 +118,43 @@
 </select>
 
 <div id="plot-options" style="display: none;">
-    <fieldset id="plot-controls">
+    <fieldset id="plot-controls" class="controls">
         <legend>Select Plot Types (Apache Logs):</legend>
-        <div>
+        <div class="options">
             <input type="checkbox" id="plot-events_over_time" name="plot_type" value="events_over_time" checked>
             <label for="plot-events_over_time">Events logged with time (Line)</label>
         </div>
-        <div>
+        <div class="options">
             <input type="checkbox" id="plot-level_distribution" name="plot_type" value="level_distribution">
             <label for="plot-level_distribution">Level State Distribution (Pie)</label>
         </div>
-        <div>
+        <div class="options">
             <input type="checkbox" id="plot-event_code_distribution" name="plot_type" value="event_code_distribution">
             <label for="plot-event_code_distribution">Event Code Distribution (Bar)</label>
+        </div>
+        <div class="options">
+            <input type="checkbox" id="plot-custom" name="plot_type" value="custom">
+            <label for="plot-custom">Custom Plot</label>
         </div>
 
         <button class="green-btn" id="generate-plots-btn">Generate Plots</button>
     </fieldset>
 
-    <fieldset id="filter-controls">
+    <fieldset id="filter-controls" class="controls">
         <legend>Select Filter Range:</legend>
         {% include 'filter_controls.html' %}
+    </fieldset>
+
+
+    <fieldset id="code-editor-controls" class="controls">
+        <legend>Custom Python Code Editor:</legend>
+        <div id="code-editor-instructions">
+            Write custom Python code to generate plots using <code>plt</code>. Other libraries are given as
+            <code>mpl, np, pd</code>. Do not include <code>plt.savefig / plt.show</code> in the code.
+        </div>
+        <textarea id="code-editor" name="code-editor"># The data has been loaded in a dataframe object named `data_df`
+# with columns - "LineId", "Time", "Level", "Content", "EventId"
+# where "Time" has been converted to datetime series already</textarea>
     </fieldset>
 </div>
 

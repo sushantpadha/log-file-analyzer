@@ -28,7 +28,7 @@ function getMetadataRequestURL(logId) {
 	return `/get_metadata/${logId}`;
 }
 
-function getPlotRequest(logId, plotOpts) {
+function getPlotRequest(logId, plotOpts, customCode) {
 	const endpoint = "/generate_plots/";
 
 	const payload = {
@@ -39,7 +39,8 @@ function getPlotRequest(logId, plotOpts) {
 			plot_options: plotOpts,
 			// sending filter options as formatted string
 			// for uniformity in backend code
-			filter_options: `${startDatetimeOpt},${endDatetimeOpt}`
+			filter_options: `${startDatetimeOpt},${endDatetimeOpt}`,
+			custom_code: customCode,
 		})
 	};
 	return { endpoint, payload };
