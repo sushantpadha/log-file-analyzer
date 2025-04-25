@@ -19,6 +19,8 @@ dropZone.addEventListener('dragleave', (e) => {
 dropZone.addEventListener('drop', (e) => {
 	e.preventDefault();
 	dropZone.classList.remove('dragover');
+	// get the files from the drop event and handle them
+	// Ref: https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer
 	const files = e.dataTransfer.files;
 	if (files.length) {
 		handleFiles(files);
@@ -26,6 +28,7 @@ dropZone.addEventListener('drop', (e) => {
 });
 
 // ============== make full drop zone clickable ================
+
 dropZone.addEventListener('click', () => {
 	fileInput.click();
 });
@@ -39,24 +42,21 @@ fileInput.addEventListener('change', () => {
 });
 
 // ================ handle files ====================
+
 function handleFiles(files) {
 	Array.from(files).forEach(file => {
-		if (file.name.endsWith('.log')) {
-			uploadFile(file);
-		} else {
-			// show warning for non-log files
-			console.warn(`skipping non-log file: ${file.name}`);
-			addStatusTile(file.name, false, `Skipped: file must end with .log`);
-		}
+		// no additional checks (server will handle it)
+		uploadFile(file);
 	});
 }
 
 // =============== upload and process files ===============
+
 async function uploadFile(file) {
 
 	// Ref: https://developer.mozilla.org/en-US/docs/Web/API/FormData
 	// create formdata object and make `fetch` request
-	
+
 	const formData = new FormData();
 	formData.append('log_file', file);
 
@@ -66,23 +66,21 @@ async function uploadFile(file) {
 
 	// Ref: https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
 
-	// using .then for cleaner code (assuming response will always be JSON)
-
-    fetch('/upload', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('Server response:', data);
-        // update the specific tile with the result
-        updateStatusTile(tempId, file.name, data.success, data.message);
-    })
-    .catch(error => {
-        console.error('Upload error:', error);
-        // update the specific tile with the error
-        updateStatusTile(tempId, file.name, false, `Upload failed: ${error.message}`);
-    });
+	try {
+		const response = await fetch('/upload', {
+			method: 'POST',
+			body: formData
+		});
+		const result = await response.json();
+		console.log('Server response:', result);
+		// update the specific tile with the result
+		updateStatusTile(tempId, file.name, result.success, result.message);
+	}
+	catch (err) {
+		console.error('Upload error:', err);
+		// update the specific tile with the error
+		updateStatusTile(tempId, file.name, false, `Upload failed: ${err.message}`);
+	}
 }
 
 // =================== helper funcs for making status tiles ===================

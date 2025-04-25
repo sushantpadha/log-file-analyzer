@@ -281,8 +281,8 @@ def sort_data(data, opts):
     return data
 
 
-# check if dates are in correct format: YYYY-mm-DD HH:MM:SS
 def validate_datetime_str(datetime):
+    """Check if dates are in correct format: YYYY-mm-DD HH:MM:SS"""
     try:
         date, t = datetime.split()
 
@@ -1160,7 +1160,6 @@ def serve_metadata(log_id):
         # error is server error
         return jsonify({"error": f"{e}"}), 500
 
-    # return jsonify({"error": f"ggez"})
     return response
 
 

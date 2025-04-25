@@ -130,7 +130,8 @@ async function sendPlotRequest(endpoint, payload) {
 	try {
 		// send the request to the server
 		const response = await fetch(endpoint, payload);
-		if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+		// ! NOTE: here we try to display whatever the server returns to the user
+		// if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 		const result = await response.json();
 		if (result.error) return showError(`Error loading data: ${result.error}`);
 
@@ -165,13 +166,13 @@ function pollPlotStatus() {
 			if (result.status == 'error') {
 				// NOTE: in this case, we terminate on error
 				clearInterval(interval);
-				showError(`Error in plot generation / status file I/O: ${result.error}`);
+				showError(`Error in plot gen. / status file I/O: ${result.error}`);
 				return;
 			}
 
 			if (result.error) {
 				// NOTE: in this case, we do not terminate on error
-				showError(`Error in plot generation / status file I/O: ${result.error}`);
+				showError(`Error in plot gen. / status file I/O: ${result.error}`);
 			}
 
 			// if done, render plots
