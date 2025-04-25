@@ -152,9 +152,13 @@
             Write custom Python code to generate plots using <code>plt</code>. Other libraries are given as
             <code>mpl, np, pd</code>. Do not include <code>plt.savefig / plt.show</code> in the code.
         </div>
-        <textarea id="code-editor" name="code-editor"># The data has been loaded in a dataframe object named `data_df`
-# with columns - "LineId", "Time", "Level", "Content", "EventId"
-# where "Time" has been converted to datetime series already</textarea>
+        <textarea id="code-editor" name="code-editor"># The data has been loaded in a dataframe: `data_df` with columns - "LineId", "Time", "Level", "Content", "EventId"
+# where "Time" has been converted to datetime series already
+
+# --- Example: plotting level distribution as bar for E1, E2, E3 events only ---
+#plt.figure(figsize=(11,6))
+#counts = data_df[data_df["EventId"].isin(("E1","E2","E3"))]["Level"].value_counts()
+#plt.bar(counts.index, counts.values)</textarea>
     </fieldset>
 </div>
 

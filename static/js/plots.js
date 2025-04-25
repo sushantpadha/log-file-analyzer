@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		lineNumbers: true,
 		indentUnit: 4,
 		tabSize: 4,
-		lineWrapping: true
+		lineWrapping: true,
 	});
 });
 
