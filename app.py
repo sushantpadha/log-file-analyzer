@@ -9,8 +9,6 @@ import json
 # import threading for spawning plot generation in bg thread
 from threading import Thread
 
-# Using csv and pandas module because customizations are enabled
-import pandas as pd
 import numpy as np
 
 from flask import (
@@ -29,8 +27,11 @@ import matplotlib
 # set non-interactive backend, ideal for this use case
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.dates import AutoDateLocator, DateFormatter
-from matplotlib.ticker import MaxNLocator
+import matplotlib as mpl
+from matplotlib.dates import AutoDateLocator
+from matplotlib.ticker import MaxNLocator, FuncFormatter
+
+import pandas as pd
 
 # CONFIGURATION
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -79,6 +80,7 @@ PLOT_TYPES = {
     "events_over_time",
     "level_distribution",
     "event_code_distribution",
+    "custom",
 }
 
 EVENT_CODES = {
@@ -92,6 +94,7 @@ EVENT_CODES = {
 
 ############## HELPER FUNCTIONS ################
 
+
 def seconds_from_timestamp(timestamp):
     """Return number of seconds elapsed between `timestamp` wrt 0001-01-01 00:00:00"""
     timestamp = format_timestamp(timestamp)
@@ -99,24 +102,29 @@ def seconds_from_timestamp(timestamp):
     def to_seconds(tstmp):
         if not tstmp:
             return 0
-        
+
         d, t = tstmp.split()
-        yr, mo, day = map(int, d.split('-'))
-        hr, mn, sc  = map(int, t.split(':'))
+        yr, mo, day = map(int, d.split("-"))
+        hr, mn, sc = map(int, t.split(":"))
 
         days_in_month = [
             31,
             28 + (1 if (yr % 4 == 0 and (yr % 100 != 0 or yr % 400 == 0)) else 0),
-            31, 30, 31, 30,
-            31, 31, 30, 31,
-            30, 31,
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
         ]
 
         # 1) days from all years before this one (leaps = (N-1)//4 - (N-1)//100 + (N-1)//400)
         years_prior = yr - 1
-        leaps_prior = (years_prior // 4
-                    - years_prior // 100
-                    + years_prior // 400)
+        leaps_prior = years_prior // 4 - years_prior // 100 + years_prior // 400
         days_prior_years = years_prior * 365 + leaps_prior
 
         # 2) days from all months earlier in this year
@@ -131,25 +139,25 @@ def seconds_from_timestamp(timestamp):
         total_seconds = total_days * 86400 + hr * 3600 + mn * 60 + sc
 
         return total_seconds
-    
+
     return to_seconds(timestamp)
 
 
-def timestamp_from_seconds(total_seconds):
-    """Convert seconds since 0001-01-01 00:00:00 to YYYY-mm-DD HH:MM:SS"""
-    # 1) break into days and seconds within the day
+def timestamp_from_seconds(total_seconds, pos=None):
+    """Convert seconds since 0001-01-01 00:00:00 to YYYY-mm-DD HH:MM:SS (`pos` arg is for usage with `matplotlib.ticker.FuncFormatter`)"""
+    total_seconds = int(total_seconds)
     days = total_seconds // 86400
-    rem  = total_seconds % 86400
-    hr   = rem // 3600
-    rem  %= 3600
-    mn   = rem // 60
-    sc   = rem % 60
+    rem = total_seconds % 86400
+    hr = rem // 3600
+    rem %= 3600
+    mn = rem // 60
+    sc = rem % 60
 
     # 2) convert total days into year / month / day
     # start from year 1 and add year lengths until remaining days is within the year
     year = 1
     while True:
-        is_leap = (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0))
+        is_leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
         days_in_year = 366 if is_leap else 365
         if days < days_in_year:
             break
@@ -159,9 +167,16 @@ def timestamp_from_seconds(total_seconds):
     days_in_month = [
         31,
         28 + (1 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 0),
-        31, 30, 31, 30,
-        31, 31, 30, 31,
-        30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ]
     month = 1
     for dim in days_in_month:
@@ -176,7 +191,7 @@ def timestamp_from_seconds(total_seconds):
 
 
 def format_timestamp(csvTimestamp):
-    _, mo, dt, time, yr = csvTimestamp.split(" ")
+    _, mo, dt, t, yr = csvTimestamp.split(" ")
 
     month_map = {
         "Jan": "01",
@@ -194,7 +209,7 @@ def format_timestamp(csvTimestamp):
     }
     month = month_map[mo]
 
-    return f"{yr}-{month}-{dt} {time}"
+    return f"{yr}-{month}-{dt} {t}"
 
 
 def validate_filename(filename: str):
@@ -269,7 +284,7 @@ def sort_data(data, opts):
 # check if dates are in correct format: YYYY-mm-DD HH:MM:SS
 def validate_datetime_str(datetime):
     try:
-        date, time = datetime.split()
+        date, t = datetime.split()
 
         yr, mo, dy = date.split("-")
         yr, mo, dy = int(yr), int(mo), int(dy)
@@ -295,7 +310,7 @@ def validate_datetime_str(datetime):
         if not (1 <= dy <= days_in_month[mo - 1]):
             return False
 
-        hr, mi, se = list(map(int, time.split(":")))
+        hr, mi, se = list(map(int, t.split(":")))
 
         if not (0 <= hr < 24 and 0 <= mi < 60 and 0 <= se < 60):
             return False
@@ -688,21 +703,24 @@ def set_plot_generation_status(status_str, plot_files=None, error_str=None):
         )
 
 
-def generate_plots(data_df, plot_opts, plot_files):
-    """Generate plots based on `data_df` (`pd.DataFrame`), `plot_opts` (`List[str]`) and `plot_files` (`Dict[str, str]`)."""
+def generate_plots(data, plot_opts, plot_files, custom_code=None):
+    """Generate plots based on `data_df` (`List[List[str]]`), `plot_opts` (`List[str]`), `plot_files` (`Dict[str, str]`) and `custom_code` (`str`)"""
     ### set status to processing
     set_plot_generation_status(status_str="processing", plot_files=plot_files)
 
-    def get_counts_dict(data, key):
-        """Returns counts of items summed over all rows of `data`, where items are extracted using func `key`."""
+    def get_counts(data, key, sort_key=lambda x: x[0]):
+        """Returns counts of items summed over all rows of `data`, where items are extracted using func `key`.
+        Returns tuple of two lists: first list containing values, second containing counts, both sorted acc. to `sort_key` (applied to dict.items())
+        """
         counts = {}
         for row in data:
-            value = key(data)
+            value = key(row)
             if value not in counts:
                 counts[value] = 1
             else:
                 counts[value] += 1
-        return counts
+        values, counts = zip(*sorted(counts.items(), key=sort_key))
+        return values, counts
 
     # `plot_opts` can contain one or more of:
     # [events_over_time, level_distribution, event_code_distribution]
@@ -724,6 +742,10 @@ def generate_plots(data_df, plot_opts, plot_files):
         "size": 14,
     }
 
+    # NOTE: Using
+    # LineId, Time, Level, Content, EventId
+    my_timestamp_formatter = FuncFormatter(timestamp_from_seconds)
+
     ### generate plots based on type
 
     try:
@@ -732,31 +754,31 @@ def generate_plots(data_df, plot_opts, plot_files):
 
             fig.tight_layout()
 
-            # ! have to convert timestamps to datetime objects
-            # `pd.to_datetime`: https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html
-            # strptime format: https://docs.python.org/3/library/datetime.html#strftime-and-strptime-behavior
-            dt_series = pd.to_datetime(data_df["Time"], format="%a %b %d %H:%M:%S %Y")
+            # convert timestamps to seconds
+            seconds_series = np.array([seconds_from_timestamp(row[1]) for row in data])
 
-            # generate full range of timestamps from start to end with step = 1s
-            # https://pandas.pydata.org/docs/reference/api/pandas.date_range.html
-            full_range = pd.date_range(
-                start=dt_series.min(), end=dt_series.max(), freq="s"
+            # make all seconds values 0-referenced
+            # ! so that they can be used as index
+            ref_point = seconds_series.min().item()
+            seconds_series -= ref_point
+            size = seconds_series.max().item() + 1
+
+            # generate full range of secondses from start to end with step = 1s
+            secondses_range = np.arange(0, size, 1) + ref_point
+
+            # count occurrences of each seconds
+            unique_secondses, seconds_counts = np.unique(
+                seconds_series, return_counts=True
             )
 
-            # count occurrences of each timestamp
-            timestamp_counts = dt_series.value_counts().reindex(
-                full_range, fill_value=0
-            )
+            # create full counts array
+            counts = np.zeros_like(secondses_range)
+            counts[unique_secondses] = seconds_counts
 
             # plot the line graph
-
-            # NOTE: uncomment below line to plot only the non-zero occurences (slightly misleading)
-            # NOTE: if you dont, 0 values will also be plotted giving histogram like appearance
-            # timestamp_counts = timestamp_counts[timestamp_counts != 0]
-
             ax.plot(
-                timestamp_counts.index,
-                timestamp_counts.values,
+                secondses_range,
+                counts,
                 linewidth=1.5,
             )
 
@@ -765,11 +787,13 @@ def generate_plots(data_df, plot_opts, plot_files):
             ax.set_ylabel("Number of events per second", fontdict=label_font)
             ax.set_title("Events logged with time (Line Graph)", fontdict=title_font)
 
-            # set auto locator for x-axis with 4 to 14 ticks
-            ax.xaxis.set_major_locator(AutoDateLocator(minticks=4, maxticks=14))
+            # set auto locator for x-axis
+            ax.xaxis.set_major_locator(
+                MaxNLocator(min_n_ticks=5, nbins="auto", integer=True)
+            )
 
             # format timestamps to original format
-            ax.xaxis.set_major_formatter(DateFormatter("%a %b %d %H:%M:%S %Y"))
+            ax.xaxis.set_major_formatter(my_timestamp_formatter)
 
             # set y-axis to have only integer ticks
             ax.yaxis.set_major_locator(MaxNLocator(integer=True))
@@ -801,15 +825,14 @@ def generate_plots(data_df, plot_opts, plot_files):
             # square figure
             fig, ax = plt.subplots(figsize=(8, 8))
 
-            event_counts = data_df.sort_values(axis=0, by="Level").value_counts(
-                "Level", sort=False
-            )
+            # get level counts
+            levels, level_counts = get_counts(data, lambda row: row[2])
 
             # create the pie chart
             wedges, texts, autotexts = ax.pie(
-                event_counts.values,
-                labels=event_counts.index,
-                autopct="%1.1f%%",
+                level_counts,
+                labels=levels,
+                autopct=lambda p: f"{p:.2f}%",
                 startangle=0,
                 textprops=label_font,
                 pctdistance=0.85,
@@ -834,15 +857,16 @@ def generate_plots(data_df, plot_opts, plot_files):
             fig, ax = plt.subplots(figsize=(10, 6))
 
             # get event code wise counts
-            event_counts = data_df.sort_values(axis=0, by="EventId").value_counts(
-                "EventId", sort=False
-            )
+            event_codes, event_code_counts = get_counts(data, lambda row: row[4])
 
             # only keep valid labels
-            event_counts = event_counts.loc[event_counts.index.isin(EVENT_CODES)]
+            for i, key in enumerate(event_codes):
+                if key not in EVENT_CODES:
+                    del event_codes[i]
+                    del event_code_counts[i]
 
             # create the bar chart
-            bars = ax.bar(event_counts.index, event_counts.values)
+            bars = ax.bar(event_codes, event_code_counts)
 
             ax.set_xlabel("Event ID", fontdict=label_font)
             ax.set_ylabel("Number of Occurrences", fontdict=label_font)
@@ -871,12 +895,65 @@ def generate_plots(data_df, plot_opts, plot_files):
                 bbox_inches="tight",
             )
             plt.close(fig)
+
     except Exception as e:
         print(e)
         set_plot_generation_status(status_str="error", plot_files={}, error_str=f"{e}")
+        # ensure all figure are closed
+        plt.close('all')
+        return
 
+    # ! doing basic error handling for this part separately
+    try:
+        if "custom" in plot_opts:
+            # create df from data
+            data_df = pd.DataFrame(
+                data=data, columns=["LineId", "Time", "Level", "Content", "EventId"]
+            )
+
+            # change type to datetime for Time column
+            data_df["Time"] = pd.to_datetime(
+                data_df["Time"], format="%a %b %d %H:%M:%S %Y"
+            )
+
+            # define a very limited set of variables to export for user-submitted code
+            user_locals = {
+                "data_df": data_df,
+                "plt": plt,
+                "mpl": matplotlib,
+                "np": np,
+                "pd": pd,
+            }
+
+            # block all builtins
+            safe_globals = {
+                "__builtins__": {},
+            }
+
+            # execute the code
+            # ! ensure more checks, time out check...
+            exec(custom_code, safe_globals, user_locals)
+
+            fig = plt.gcf()
+            fig.savefig(
+                os.path.join(app.config["PLOT_FOLDER"], plot_files["custom"]),
+                format="png",
+                bbox_inches="tight",
+            )
+            plt.close(fig)
+
+    except Exception as e:
+        print(e)
+        # NOTE: if custom code fails, status is still "done" in case other plots were generated (but remove "custom" plot)
+        del plot_files["custom"]
+        set_plot_generation_status(status_str="done", plot_files=plot_files, error_str=f"[error in user submitted code]: {e}")
+        # ensure all figure are closed
+        plt.close('all')
+        return
+        
     ### set status to done
     set_plot_generation_status(status_str="done", plot_files=plot_files)
+
 
 
 ################## ROUTES #####################
@@ -1083,6 +1160,7 @@ def serve_metadata(log_id):
         # error is server error
         return jsonify({"error": f"{e}"}), 500
 
+    # return jsonify({"error": f"ggez"})
     return response
 
 
@@ -1148,6 +1226,7 @@ def handle_generate():
     log_id = data.get("log_id")  # str
     plot_opts = data.get("plot_options")  # list -> set (later)
     filter_opts = data.get("filter_options")  # str
+    custom_code = data.get("custom_code")  # str
 
     print(
         f"received request with\n\tlog_id: {log_id}\n\tplot_opts: {plot_opts}\n\tfilter_opts: {filter_opts}"
@@ -1174,18 +1253,32 @@ def handle_generate():
 
     try:
         data = get_csv_data(csv_fpath, None, filter_opts, for_download=False)
-        data_df = pd.DataFrame(data=data["data"], columns=data["header"])
+        # data_df = pd.DataFrame(data=data["data"], columns=data["header"])
 
     except Exception as e:
         # error is server error
         return jsonify({"error": f"{e}"}), 500
+
+    # basic check on custom code
+    if "custom" in plot_opts and not custom_code:
+        return jsonify({"error": "Custom code not provided."}), 400
+
+    if custom_code and len(custom_code) > 10_000:
+        return (
+            jsonify(
+                {"error": "Custom code too long (must be less than 10,000 chars)."}
+            ),
+            400,
+        )
 
     ### generate plot file names here itself as `{plot_type}: {log_id}_{plot_type}.png`
     plot_files = {p: f"{log_id}_{p}.png" for p in plot_opts}
 
     ### spawn thread for generating plot
     # ref: https://docs.python.org/3/library/threading.html#threading.Thread
-    Thread(target=generate_plots, args=(data_df, plot_opts, plot_files)).start()
+    Thread(
+        target=generate_plots, args=(data["data"], plot_opts, plot_files, custom_code)
+    ).start()
 
     ### return response containing file containing the status
     return jsonify({"status_file": PLOT_STATUS_FILEPATH})
