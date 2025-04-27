@@ -59,7 +59,7 @@ NR > 1 {
 	fmtd = format($2)
 	if (ge(fmtd, START_DATE) && ge(END_DATE, fmtd)) {
 		output = 1
-		print "adding line " NR " " $0 
+		# print "adding line " NR " " $0 
 		print $0 >> OUTFILE
 	}
 }
