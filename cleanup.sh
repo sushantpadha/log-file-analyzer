@@ -2,4 +2,4 @@
 
 # helper script to clean up all stored data
 
-rm -f processed/* uploads/* plots/* instance/*
+rm -rf processed/* uploads/* plots/* instance/*
