@@ -1,6 +1,6 @@
 BEGIN {
-	FS=""
-	OFS=","
+	FS=""    # read whole line as field
+	OFS=","  # write csv with comma delimiter
 
 	# defining event templates as strings for regex matching
 

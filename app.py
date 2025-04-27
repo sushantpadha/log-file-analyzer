@@ -18,7 +18,6 @@ from flask import (
     jsonify,
     send_from_directory,
     abort,
-    url_for,
 )
 import flask
 
@@ -28,7 +27,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from matplotlib.dates import AutoDateLocator
 from matplotlib.ticker import MaxNLocator, FuncFormatter
 
 import pandas as pd
@@ -920,7 +918,7 @@ def generate_plots(data, plot_opts, plot_files, custom_code=None):
             user_locals = {
                 "data_df": data_df,
                 "plt": plt,
-                "mpl": matplotlib,
+                "mpl": mpl,
                 "np": np,
                 "pd": pd,
             }
