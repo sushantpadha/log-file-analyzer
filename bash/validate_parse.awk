@@ -1,5 +1,3 @@
-
-
 BEGIN {
 	FS=""    # read whole line as field
 	OFS=","  # write csv with comma delimiter
@@ -9,20 +7,24 @@ BEGIN {
 	# NOTE:
 	# - basic IPv4 matching => [0-9]{1,3}(\.[0-9]{1,3}){3}
 
-	# using \\ => for escaping string parser and regex parser
-    template_re["E1"] = "^jk2_init\\(\\) Found child [0-9]* in scoreboard slot [0-9]*"
-    template_re["E2"] = "^workerEnv\\.init\\(\\) ok .*"
-    template_re["E3"] = "^mod_jk child workerEnv in error state [0-9]*"
-    template_re["E4"] = "^\\[client [0-9]{1,3}(\\.[0-9]{1,3}){3}\\] Directory index forbidden by rule: .*"
-    template_re["E5"] = "^jk2_init\\(\\) Can't find child [0-9]* in scoreboard"
-    template_re["E6"] = "^mod_jk child init [0-9-]* [0-9-]*"
-	
-    template_str["E1"] = "jk2_init() Found child <*> in scoreboard slot <*>"
-    template_str["E2"] = "workerEnv.init() ok <*>"
-    template_str["E3"] = "mod_jk child workerEnv in error state <*>"
-    template_str["E4"] = "[client <*>] Directory index forbidden by rule: <*>"
-    template_str["E5"] = "jk2_init() Can't find child <*> in scoreboard"
-    template_str["E6"] = "mod_jk child init <*> <*>"
+	# reading template strings from file for modularity
+
+	fpath = "bash/template-data/apache_re"
+	i = 0
+	while ((getline line < fpath) > 0) {
+		i++
+		template_re["E" i] = line
+	}
+	close(fpath)
+
+	fpath = "bash/template-data/apache_str"
+	i = 0
+	while ((getline line < fpath) > 0) {
+		i++
+		template_str["E" i] = line
+	}
+	close(fpath)
+
 
 	# stricter regex (better timestamp checking)
 	# \1 = timestamp

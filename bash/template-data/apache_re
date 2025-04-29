@@ -1,0 +1,6 @@
+^jk2_init\(\) Found child [0-9]* in scoreboard slot [0-9]*
+^workerEnv\.init\(\) ok .*
+^mod_jk child workerEnv in error state [0-9]*
+^\[client [0-9]{1,3}(\.[0-9]{1,3}){3}\] Directory index forbidden by rule: .*
+^jk2_init\(\) Can't find child [0-9]* in scoreboard
+^mod_jk child init [0-9-]* [0-9-]*
