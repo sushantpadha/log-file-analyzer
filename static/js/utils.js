@@ -1,3 +1,4 @@
+// common ekements
 const sortResetBtn = document.getElementById('sort-reset-btn');
 const filterApplyBtn = document.getElementById('filter-apply-btn');
 const filterResetBtn = document.getElementById('filter-reset-btn');
@@ -18,6 +19,7 @@ let endDatetimeOpt = ""
 let minDatetimeOpt = startDatetimeOpt;
 let maxDatetimeOpt = endDatetimeOpt;
 
+// ======================= functions for getting requst endpoints ======================
 function getCSVRequestURL(logId, forDownload = false) {
 	const endpoint = (forDownload ? '/download_csv/' : '/get_csv/')
 
@@ -56,6 +58,7 @@ function getPlotURL(plotFile, forDownload = false) {
 	return endpoint + `${plotFile}?ts=${Date.now()}`;
 }
 
+// ===================== hlpers for filter/sort opts parsing and setting ===========
 function parseDatetimeInputs() {
 	// read data from inputs
 	const startDate = startDateEl.value;

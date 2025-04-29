@@ -1,24 +1,25 @@
-const dropZone = document.getElementById('drop-area');
+const dropArea = document.getElementById('drop-area');
 const fileInput = document.getElementById('file-input');
 const fileStatusArea = document.getElementById('file-status-area');
 
-// ================= prevent default browser behavior ===============
+// ====================== event listeners =======================
 
 // Ref: https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API
 
-dropZone.addEventListener('dragover', (e) => {
+// prevent default behvaiour
+dropArea.addEventListener('dragover', (e) => {
 	e.preventDefault();
-	dropZone.classList.add('dragover');
+	dropArea.classList.add('dragover');
 });
 
-dropZone.addEventListener('dragleave', (e) => {
+dropArea.addEventListener('dragleave', (e) => {
 	e.preventDefault();
-	dropZone.classList.remove('dragover');
+	dropArea.classList.remove('dragover');
 });
 
-dropZone.addEventListener('drop', (e) => {
+dropArea.addEventListener('drop', (e) => {
 	e.preventDefault();
-	dropZone.classList.remove('dragover');
+	dropArea.classList.remove('dragover');
 	// get the files from the drop event and handle them
 	// Ref: https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer
 	const files = e.dataTransfer.files;
@@ -27,9 +28,8 @@ dropZone.addEventListener('drop', (e) => {
 	}
 });
 
-// ============== make full drop zone clickable ================
-
-dropZone.addEventListener('click', () => {
+// make whole drop area clickable
+dropArea.addEventListener('click', () => {
 	fileInput.click();
 });
 

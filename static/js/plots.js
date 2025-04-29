@@ -12,6 +12,7 @@ import {
 	resetFilterValues,
 } from "./utils.js";
 
+// define elements
 const selectEl = document.getElementById('log-select-plot');
 const optionsDiv = document.getElementById('plot-options');
 
@@ -37,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	updateOptionsDiv();
 	toggleEditor();
 
+	// initialize code editor via code mirror
 	window.codeEditor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
 		mode: "python",
 		theme: "default",
@@ -48,14 +50,16 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 selectEl.addEventListener('click', () => {
-	updateOptionsDiv();
+	// check if new one has been selected
 	if (selectEl.value && selectEl.value !== oldSelectedId) {
 		oldSelectedId = selectEl.value;
 		resetFilterValues();
 		updateFilterOptsValues();
 	}
+	updateOptionsDiv();
 });
 
+// buttons and input elements
 customCheckbox.addEventListener('change', toggleEditor);
 
 filterApplyBtn.addEventListener('click', filterBtnCallback);
@@ -77,6 +81,7 @@ function toggleEditor() {
 	}
 }
 
+// get datetime, validate and set values and update table
 function filterBtnCallback() {
 	const { startDatetime, endDatetime } = parseDatetimeInputs();
 
@@ -232,6 +237,7 @@ function renderPlots(plotFiles) {
 
 // ===================== helper ========================
 
+// update filter options with provided values
 async function updateFilterOptsValues() {
 	try {
 		const response = await fetch(getMetadataRequestURL(selectEl.value));
@@ -256,6 +262,7 @@ async function updateFilterOptsValues() {
 	}
 }
 
+// helper for error
 function showError(message) {
 	loadingMessage.style.display = 'none';
 	errorMessage.textContent = message;

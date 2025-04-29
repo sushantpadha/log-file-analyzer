@@ -15,6 +15,7 @@ import {
 	resetFilterValues,
 } from "./utils.js";
 
+// define elements
 const selectEl = document.getElementById('log-select');
 const displayArea = document.getElementById('log-display-area');
 const logTable = document.getElementById('log-table');
@@ -36,21 +37,24 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 selectEl.addEventListener('click', () => {
-	updateTable();
+	// check if new one has been selected
 	if (selectEl.value && selectEl.value !== oldSelectedId) {
 		oldSelectedId = selectEl.value;
 		resetFilterValues();
 		updateFilterOptsValues();
 	}
+	updateTable();
 });
 
 filterApplyBtn.addEventListener('click', filterBtnCallback);
 
+// sort reset
 sortResetBtn.addEventListener('click', () => {
 	resetSortOpts();
 	updateTable();
 });
 
+// filter reset
 filterResetBtn.addEventListener('click', () => {
 	updateTable();
 	updateFilterOptsValues();
@@ -59,6 +63,7 @@ filterResetBtn.addEventListener('click', () => {
 
 // ====================== callback functions =======================
 
+// get datetime, validate and set values and update table
 function filterBtnCallback() {
 	const { startDatetime, endDatetime } = parseDatetimeInputs();
 
@@ -81,6 +86,7 @@ function sortBtnCallback(type, field) {
 async function updateTable() {
 	const selectedLogId = selectEl.value;
 
+	// reset elements
 	logTable.querySelector('thead').innerHTML = '';
 	logTable.querySelector('tbody').innerHTML = '';
 	errorMessage.style.display = 'none';
@@ -95,6 +101,7 @@ async function updateTable() {
 	const reqURL = getCSVRequestURL(selectedLogId, false);
 	console.log(`Making HTTP request: ${reqURL}`);
 
+	// make new request for csv data
 	try {
 		const response = await fetch(reqURL);
 		if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -155,6 +162,7 @@ async function updateTable() {
 
 // ===================== helper ========================
 
+// update filter options with provided values
 async function updateFilterOptsValues() {
 	try {
 		const response = await fetch(getMetadataRequestURL(selectEl.value));
@@ -178,6 +186,7 @@ async function updateFilterOptsValues() {
 	}
 }
 
+// helper for error
 function showError(message) {
 	loadingMessage.style.display = 'none';
 	errorMessage.textContent = message;
