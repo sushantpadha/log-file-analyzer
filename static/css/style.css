@@ -79,7 +79,8 @@ h3 {
 
 /* table */
 #log-table {
-    width: 100%;
+    /* for larger tables */
+    width: 200%;
     border-collapse: collapse;
     /* collapse adjacent bordes */
     margin-top: 15px;
