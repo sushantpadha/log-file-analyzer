@@ -4,14 +4,26 @@
 
 {% block head_extra %}
 <style>
-    /* form controls */
-    #controls {
-        margin-top: 15px;
-        display: none;
+    /* place the controls side by side using flex and flex-wrap */
+    #options {
+        display: flex;
+        gap: 2em;
+        margin-top: 1em;
+        /* https://developer.mozilla.org/en-US/docs/Web/CSS/flex-wrap */
+        flex-wrap: wrap;
+        flex-flow: wrap;
     }
 
+    #options legend {
+        font-weight: bold;
+        margin-bottom: 0.5em;
+        color: rgb(67, 67, 67);
+    }
+    
     #download-csv-link {
-        margin-left: 10px;
+        padding: 7.5px 10px;
+        margin: 0px;
+        border-radius: 5px;
     }
 
     #log-display-area {
@@ -22,6 +34,19 @@
 
     .datetime-input-label {
         /* display: inline-block; */
+    }
+
+    #controls {
+        /* https://developer.mozilla.org/en-US/docs/Web/CSS/flex */
+        display: flex;
+        flex: 1 1 300px;
+        justify-content: space-between;
+        flex-direction: row;
+        align-items: flex-end;
+        padding: 1em;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        background-color: #f9f9f9;
     }
 
     /* buttons */
@@ -55,21 +80,29 @@
 <h1>Display Processed Logs</h1>
 
 {% if available_files %}
-<label for="log-select">Select Log File:</label>
-<select id="log-select">
-    <option value="">-- Select a File --</option>
-    {% for file_id, orig_name in available_files.items() %}
-    <option value="{{ file_id }}">{{ orig_name }} (ID: {{ file_id }})</option>
-    {% endfor %}
-</select>
+<div id="options">
+    <div class="suboptions">
+        <label for="log-select">Select Log File:</label>
+        <select id="log-select">
+            <option value="">-- Select a File --</option>
+            {% for file_id, orig_name in available_files.items() %}
+            <option value="{{ file_id }}">{{ orig_name }} (ID: {{ file_id }})</option>
+            {% endfor %}
+        </select>
+    </div>
 
-<div id="controls">
-    {% include 'filter_controls.html' %}
+    <fieldset id="controls">
+        <legend>Controls:</legend>
+        <div id="filter-controls">
+            {% include 'filter_controls.html' %}
+        </div>
 
-    <button class="green-btn" id="sort-reset-btn">Reset Sort</button>
+        <button class="blue-btn" id="sort-reset-btn">Reset Sort</button>
 
-    <!-- Ref: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a -->
-    <a href="#" id="download-csv-link" download>Download this CSV</a>
+        <!-- Ref: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a -->
+        <a href="#" id="download-csv-link" class="blue-btn" download>Download this CSV</a>
+
+    </fieldset>
 </div>
 
 <div id="log-display-area">

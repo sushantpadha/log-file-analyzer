@@ -216,7 +216,7 @@ function renderPlots(plotFiles) {
 
 		// plot download link
 		const plotDLLink = document.createElement('a');
-		plotDLLink.classList.add('plot-dl-link');
+		plotDLLink.classList.add('plot-dl-link', 'fake-btn');
 		plotDLLink.textContent = "Download Plot";
 		plotDLLink.href = getPlotURL(file, true);
 		plotDLLink.download = file;

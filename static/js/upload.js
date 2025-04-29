@@ -1,4 +1,4 @@
-const dropZone = document.getElementById('drop-zone');
+const dropZone = document.getElementById('drop-area');
 const fileInput = document.getElementById('file-input');
 const fileStatusArea = document.getElementById('file-status-area');
 
@@ -105,10 +105,11 @@ function addStatusTile(filename, success, message, tileId) {
 	} else if (success === false) {
 		tile.classList.add('error');
 	} else {
-		// create and add spinner
-		const spinner = document.createElement('div');
-		spinner.classList.add('spinner');
-		statusIndicator.appendChild(spinner);
+		// create and add loading emoji
+		const loading = document.createElement('div');
+		loading.classList.add('loading');
+		loading.innerText = '⏳';
+		statusIndicator.appendChild(loading);
 	}
 
 	// add elements in order

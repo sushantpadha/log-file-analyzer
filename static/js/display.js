@@ -143,7 +143,7 @@ async function updateTable() {
 		});
 
 		// display controls
-		controlsDiv.style.display = 'block';
+		controlsDiv.style.display = 'flex';
 		downloadLink.href = getCSVRequestURL(selectedLogId, true);
 		downloadLink.download = `${selectedLogId}.csv`;
 	}
