@@ -23,7 +23,7 @@ def sort_data(data, opts):
 
     # start sorting from minor
     for o in reversed(opts):
-        # o is string where 1st char = +/-, 2nd char is int [0, 4]
+        # o is string where 1st char = +/-, 2nd char is int [0, 5]
 
         field = int(o[1])
         reverse = True if o[0] == "-" else False
@@ -32,8 +32,8 @@ def sort_data(data, opts):
         if field == 0:
             key = lambda x: int(x[0])
 
-        # sort by timestamp/level/content
-        elif field in [2, 3]:
+        # sort by timestamp/level/content/template
+        elif field in [2, 3, 5]:
             key = lambda x: x[field]
 
         elif field == 1:
@@ -45,7 +45,7 @@ def sort_data(data, opts):
             key = lambda x: 7 if not x[4] else int(x[4][1])
 
         else:
-            raise ValueError("opt[1] must be one of '01234'.")
+            raise ValueError("opt[1] must be one of '012345'.")
 
         data = sorted(data, key=key, reverse=reverse)
 

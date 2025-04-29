@@ -271,7 +271,7 @@ def generate_plots(_app, data, plot_opts, plot_files, custom_code=None):
             if "custom" in plot_opts:
                 # create df from data
                 data_df = pd.DataFrame(
-                    data=data, columns=["LineId", "Time", "Level", "Content", "EventId"]
+                    data=data, columns=["LineId", "Time", "Level", "Content", "EventId", "EventTemplate"]
                 )
 
                 # change type to datetime for Time column
