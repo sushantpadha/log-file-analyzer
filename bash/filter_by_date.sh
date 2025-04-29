@@ -19,7 +19,6 @@ if [[ ! -s "$1" ]]; then
 fi
 
 # ! Assumes script is always called from project root
-# TODO: ensure no issues with quoting
 awk -v OUTFILE="$2" -v START_DATE="$3" -v END_DATE="$4" -f "bash/filter_by_date.awk" "$1"
 
 err=$?

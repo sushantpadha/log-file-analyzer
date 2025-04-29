@@ -1,31 +1,49 @@
+
+
 BEGIN {
 	FS=""    # read whole line as field
 	OFS=","  # write csv with comma delimiter
 
 	# defining event templates as strings for regex matching
 
-	# NOTE: using stricter patterns here:
-	# - strictly numeric fields => [0-9] or [0-9-]
+	# NOTE:
 	# - basic IPv4 matching => [0-9]{1,3}(\.[0-9]{1,3}){3}
 
 	# using \\ => for escaping string parser and regex parser
-    templates["E1"] = "^jk2_init\\(\\) Found child [0-9]* in scoreboard slot [0-9]*"
-    templates["E2"] = "^workerEnv\\.init\\(\\) ok .*"
-    templates["E3"] = "^mod_jk child workerEnv in error state [0-9]*"
-    templates["E4"] = "^\\[client [0-9]{1,3}(\\.[0-9]{1,3}){3}\\] Directory index forbidden by rule: .*"
-    templates["E5"] = "^jk2_init\\(\\) Can't find child [0-9]* in scoreboard"
-    templates["E6"] = "^mod_jk child init [0-9-]* [0-9-]*"
+    template_re["E1"] = "^jk2_init\\(\\) Found child [0-9]* in scoreboard slot [0-9]*"
+    template_re["E2"] = "^workerEnv\\.init\\(\\) ok .*"
+    template_re["E3"] = "^mod_jk child workerEnv in error state [0-9]*"
+    template_re["E4"] = "^\\[client [0-9]{1,3}(\\.[0-9]{1,3}){3}\\] Directory index forbidden by rule: .*"
+    template_re["E5"] = "^jk2_init\\(\\) Can't find child [0-9]* in scoreboard"
+    template_re["E6"] = "^mod_jk child init [0-9-]* [0-9-]*"
+	
+    template_str["E1"] = "jk2_init() Found child <*> in scoreboard slot <*>"
+    template_str["E2"] = "workerEnv.init() ok <*>"
+    template_str["E3"] = "mod_jk child workerEnv in error state <*>"
+    template_str["E4"] = "[client <*>] Directory index forbidden by rule: <*>"
+    template_str["E5"] = "jk2_init() Can't find child <*> in scoreboard"
+    template_str["E6"] = "mod_jk child init <*> <*>"
 
-	# general regex to match timestamp and event level
+	# stricter regex (better timestamp checking)
 	# \1 = timestamp
-	# \2 = event level
-	# \3 = content
-	# TODO: strict regex for date
-	# TODO: strict regex for IPv4
-	# TODO: strict regex day / month
-	preproc_regex="^\\[([A-Za-z]{3} [A-Za-z]{3} [0-9]{2} [0-9:]{8} [0-9]{4})\\]\\s+\\[([a-z]+)\\]\\s+(.*)$"
+	# \2 = dayname
+	# \3 = monthname
+	# \4 = day
+	# \5 = hour
+	# \6 = year
+	# \7 = level
+	# \8 = content
 
-	# TODO: NOTES
+	# must check:
+	# 1. dayname	- regex
+	# 2. monthname	- regex
+	# 3. day		- later
+	# 4. hr,min,sec	- regex
+	# 4. year		- regex, basic (4-digit code starting w 1/2)
+
+	preproc_regex="^\\[((Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{2}) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] ([12][0-9]{3}))\\]\\s+\\[([a-z]+)\\]\\s+(.*)$"
+
+	# NOTES
 	# 1. valid log entry is of the form:
 	#	`[timestamp] [level] content` where timestamp and level and roughly fixed format as encoded in regex
 	# 2. if valid, an entry may match one of the known templates
@@ -39,7 +57,7 @@ BEGIN {
 	match_count=0
 
 	# set header for csv
-	print "LineId,Time,Level,Content,EventId" > OUTFILE	
+	print "LineId,Time,Level,Content,EventId,EventTemplate" > OUTFILE	
 
 	err = 0
 }
@@ -47,18 +65,55 @@ BEGIN {
 {
 	# adding empty line check here
 	if ($0 ~ /^\s*$/) {
-		# TODO
+		# skip
 		next
 	}
 
+	valid = 0
     matched = 0
 	matched_code = ""
+	matched_template = ""
 
+	# using match to extract captured groups as well
 	if (match($0, preproc_regex, groups)) {
 		timestamp = groups[1]
-		level = groups[2]
-		content = groups[3]
+		dayname = groups[2]
+		monthname = groups[3]
+		day = groups[4] + 0   # convert to number
+		hour = groups[5] + 0
+		year = groups[6] + 0
+		level = groups[7]
+		content = groups[8]
 
+		valid = 1
+
+		# motnh map
+		days_in_month["Jan"] = 31
+		days_in_month["Feb"] = 28
+		days_in_month["Mar"] = 31
+		days_in_month["Apr"] = 30
+		days_in_month["May"] = 31
+		days_in_month["Jun"] = 30
+		days_in_month["Jul"] = 31
+		days_in_month["Aug"] = 31
+		days_in_month["Sep"] = 30
+		days_in_month["Oct"] = 31
+		days_in_month["Nov"] = 30
+		days_in_month["Dec"] = 31
+
+		# leap year adjustment
+		if (monthname == "Feb" && ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))) {
+			days_in_month["Feb"] = 29
+		}
+
+		# validate
+		if (!(day >= 1 && day <= days_in_month[monthname])) {
+			printf "(day not in range) " 
+			valid = 0
+		}
+	}
+
+	if (valid) {
 		valid_count++
 
 		# optional debugging
@@ -75,33 +130,36 @@ BEGIN {
 		exit
 	}
 
-    # Compare the remaining content against each event template.
-    for (id in templates) {
-        if (content ~ templates[id]) {
+    # compare the remaining content against each event template.
+    for (id in template_re) {
+        if (content ~ template_re[id]) {
             # optional debugging
 			# print NR " #" valid_count " [MATCH - " id "] " $0
 			match_count++
 			matched_id = id
+			matched_template = template_str[id]
             matched = 1
             break
         }
     }
 
     # If none of the templates matched, then the log line is considered unmatched.
-    if (matched == 0)
+    if (matched == 0) {
         # optional debugging
 		# print NR " #" (NR-valid_count) " [NO MATCH] " $0
+	}
 
 	# writing to csv
-	# TODO: FOR SOME REASON, BELOW CMD DOES NOT PRINT TO STDOUT
-	# TODO: BUT IF I REMOVE IT, THE NEXT (AND INTEGRAL) CMD DOES NOT WORK EITHER 
-	print(valid_count, timestamp, level, content, matched_id)
-	print(valid_count, timestamp, level, content, matched_id) >> OUTFILE
+	print(valid_count, timestamp, level, content, matched_id, matched_template) >> OUTFILE
+	fflush(OUTFILE)  # flushing to prevent unwanted buffering
+	fflush()
 }
 
 END {
-	if (err)
+	if (err) {
 		exit err
-	
+	}
+
 	print "logfile is valid apache error log"
+	fflush()
 }
