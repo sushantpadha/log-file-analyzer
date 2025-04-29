@@ -80,7 +80,7 @@ h3 {
 /* table */
 #log-table {
     /* for larger tables */
-    width: 200%;
+    width: max-content;
     border-collapse: collapse;
     /* collapse adjacent bordes */
     margin-top: 15px;
@@ -113,6 +113,7 @@ h3 {
 TODO: cant render borders properly; they get scrolled away
 */
 #log-table th {
+    padding: 0.5rem 1.5rem 0.5rem 0.5rem;
     background-color: #eee;
     font-weight: bold;
     border: 1px solid #ddd;
