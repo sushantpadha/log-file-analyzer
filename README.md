@@ -27,6 +27,7 @@ Following features have been implemented:
 - Drop-down menu for choosing logs
 - Drag and drop functionality for uploading logs
 - Validation of log files against Apache event log format
+- Modularized validation and parsing code
 - Web interface for viewing CSV data as a scrollable table
 - Sorting implemented across all fields
 - Filtering implemented according to timestamps
