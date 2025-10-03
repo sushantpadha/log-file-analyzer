@@ -39,3 +39,4 @@ Following features have been implemented:
 - Responsive and intuitive web interface
 - Extensive error handling
 - Modular code
+- Implemented RESTful API (not fully documented) that exposes processed data and plots (used implicitly in the code)
